@@ -8,6 +8,15 @@ from rich.console import Console, RenderableType
 from rich.markup import escape
 from rich.text import Text
 
+from rich_cli import get_version
+
+def _safe_version() -> str:
+    try:
+        return get_version()
+    except RuntimeError as error:
+        on_error(f"version unavailable: {error}")
+
+
 console = Console()
 error_console = Console(stderr=True)
 
@@ -36,8 +45,6 @@ COMMON_LEXERS = {
     "json": "json",
     "toml": "toml",
 }
-
-VERSION = "1.8.0"
 
 
 AUTO = 0
@@ -191,7 +198,7 @@ class RichCommand(click.Command):
         )
 
         console.print(
-            f"[b]Rich CLI[/b] [magenta]v{VERSION}[/] 🤑\n\n[dim]Rich text and formatting in the terminal\n",
+            f"[b]Rich CLI[/b] [magenta]v{_safe_version()}[/] 🤑\n\n[dim]Rich text and formatting in the terminal\n",
             justify="center",
         )
 
@@ -444,7 +451,7 @@ def main(
 ):
     """Rich toolbox for console output."""
     if version:
-        sys.stdout.write(f"{VERSION}\n")
+        sys.stdout.write(f"{_safe_version()}\n")
         return
     console = Console(
         emoji=emoji,
