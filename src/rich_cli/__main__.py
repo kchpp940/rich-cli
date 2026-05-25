@@ -8,15 +8,6 @@ from rich.console import Console, RenderableType
 from rich.markup import escape
 from rich.text import Text
 
-from rich_cli import get_version
-
-def _safe_version() -> str:
-    try:
-        return get_version()
-    except RuntimeError as error:
-        on_error(f"version unavailable: {error}")
-
-
 console = Console()
 error_console = Console(stderr=True)
 
@@ -45,6 +36,8 @@ COMMON_LEXERS = {
     "json": "json",
     "toml": "toml",
 }
+
+VERSION = "1.8.0"
 
 
 AUTO = 0
@@ -75,36 +68,25 @@ def on_error(message: str, error: Optional[Exception] = None, code=-1) -> NoRetu
 
 
 def read_resource(path: str, lexer: Optional[str]) -> Tuple[str, Optional[str]]:
-    """Read a resource form a file or stdin."""
+    """Read a resource from a URL, file, or stdin.
+
+    URL fetching is delegated to :mod:`rich_cli.url_reader`, which returns
+    a structured :class:`~rich_cli.url_reader.FetchResult`. This function
+    is the single dispatch point: it hands URL failures to ``on_error``
+    with a uniform message so 404s, timeouts, missing Content-Type and
+    binary responses all exit through the same path.
+    """
     if not path:
         on_error("missing path or URL")
 
     if path.startswith(("http://", "https://")):
-        import requests
+        from .url_reader import fetch_url
 
-        response = requests.get(path)
+        success, error = fetch_url(path, COMMON_LEXERS)
+        if error is not None:
+            on_error(error.message, error.as_exception())
+        return (success.text, lexer or success.lexer)
 
-        text = response.text
-        try:
-            mime_type: str = response.headers["Content-Type"]
-            if ";" in mime_type:
-                mime_type = mime_type.split(";", 1)[0]
-        except KeyError:
-            pass
-        else:
-            if not lexer:
-                _, dot, ext = path.rpartition(".")
-                if dot and ext:
-                    ext = ext.lower()
-                    lexer = COMMON_LEXERS.get(ext, None)
-                if lexer is None:
-                    from pygments.lexers import get_lexer_for_mimetype
-
-                    try:
-                        lexer = get_lexer_for_mimetype(mime_type).name
-                    except Exception:
-                        pass
-        return (text, lexer)
     try:
         if path == "-":
             return (sys.stdin.read(), None)
@@ -198,7 +180,7 @@ class RichCommand(click.Command):
         )
 
         console.print(
-            f"[b]Rich CLI[/b] [magenta]v{_safe_version()}[/] 🤑\n\n[dim]Rich text and formatting in the terminal\n",
+            f"[b]Rich CLI[/b] [magenta]v{VERSION}[/] 🤑\n\n[dim]Rich text and formatting in the terminal\n",
             justify="center",
         )
 
@@ -451,7 +433,7 @@ def main(
 ):
     """Rich toolbox for console output."""
     if version:
-        sys.stdout.write(f"{_safe_version()}\n")
+        sys.stdout.write(f"{VERSION}\n")
         return
     console = Console(
         emoji=emoji,
@@ -760,7 +742,6 @@ def render_csv(
     import re
     from rich import box
     from rich.table import Table
-    from operator import itemgetter
 
     is_number = re.compile(r"\-?[0-9]*?\.?[0-9]*?").fullmatch
 
