@@ -111,53 +111,6 @@ rich notebook.ipynb
 All options that apply to syntax highlighting can be applied to code cells, and all options that apply to Markdown can be
 applied to Markdown cells.
 
-### Filter by cell type
-
-You can filter cells by type with `--ipynb-cell-type`:
-
-```
-# Show only Markdown cells
-rich notebook.ipynb --ipynb-cell-type markdown
-
-# Show only code cells
-rich notebook.ipynb --ipynb-cell-type code
-```
-
-### Show a range of cells
-
-You can display a subset of cells with `--ipynb-cell-range`:
-
-```
-# Show first 3 cells
-rich notebook.ipynb --ipynb-cell-range 3
-
-# Show cells 2 through 5
-rich notebook.ipynb --ipynb-cell-range 2-5
-```
-
-### Hide execution outputs
-
-You can hide execution outputs (stdout, stderr, tracebacks, and results) with `--ipynb-no-output`:
-
-```
-rich notebook.ipynb --ipynb-no-output
-```
-
-### Combining with other options
-
-The notebook options work seamlessly with existing `theme`, `hyperlinks`, and syntax highlighting options:
-
-```
-# Show only code cells with Dracula theme and line numbers, hide outputs
-rich notebook.ipynb --ipynb-cell-type code --ipynb-no-output --theme dracula --line-numbers
-
-# Show first 5 Markdown cells with hyperlinks enabled
-rich notebook.ipynb --ipynb-cell-type markdown --ipynb-cell-range 5 --hyperlinks
-
-# Show cells 3-6 with indentation guides and no word wrap
-rich notebook.ipynb --ipynb-cell-range 3-6 --guides --no-wrap
-```
-
 ## JSON
 
 You can request JSON pretty formatting and highlighting with the `--json` or `-J` switches. If the file ends with `.json` then JSON will be auto-detected.
@@ -244,73 +197,6 @@ Note that when rich isn't writing directly to the terminal it will disable ansi 
 
 ```
 cat README.md | rich - --markdown --force-terminal
-```
-
-## Profiles
-
-You can save frequently used option combinations as named profiles in a TOML configuration file.
-
-### Creating profiles
-
-Create a file at `~/.config/rich-cli/config.toml` with the following format:
-
-```toml
-[profiles.dark-nb]
-theme = "dracula"
-line_numbers = true
-ipynb_no_output = true
-
-[profiles.nb-markdown]
-ipynb_cell_type = "markdown"
-hyperlinks = true
-
-[profiles.nb-code]
-ipynb_cell_type = "code"
-theme = "monokai"
-```
-
-### Configurable parameters
-
-The following parameters can be set in profiles:
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `theme` | string | Syntax highlighting theme |
-| `hyperlinks` | boolean | Enable hyperlinks in markdown |
-| `line_numbers` | boolean | Enable line numbers in code |
-| `guides` | boolean | Enable indentation guides |
-| `no_wrap` | boolean | Disable word wrapping |
-| `ipynb_cell_type` | string | Filter notebook cells by type |
-| `ipynb_cell_range` | string | Show a range of notebook cells |
-| `ipynb_no_output` | boolean | Hide notebook execution outputs |
-
-### Using profiles
-
-Apply a profile with the `--profile` option:
-
-```bash
-# Use the 'dark-nb' profile
-rich notebook.ipynb --ipynb --profile dark-nb
-
-# Use the 'nb-code' profile
-rich notebook.ipynb --ipynb --profile nb-code
-```
-
-### Listing profiles
-
-List all available profiles with `--list-profiles`:
-
-```bash
-rich --list-profiles
-```
-
-### Combining profiles with CLI arguments
-
-CLI arguments take precedence over profile values:
-
-```bash
-# Profile sets theme to 'monokai', but CLI overrides to 'dracula'
-rich notebook.ipynb --ipynb --profile nb-code --theme dracula
 ```
 
 ## General Options

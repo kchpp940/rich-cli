@@ -244,18 +244,6 @@ class RichCommand(click.Command):
         )
 
 
-def _list_profiles(ctx: click.Context, value: bool) -> None:
-    """List all available profiles and exit."""
-    if not value or ctx.resilient_parsing:
-        return
-    from .config import format_profiles_list
-    from rich.console import Console
-
-    console = Console()
-    console.print(format_profiles_list(), markup=True)
-    ctx.exit()
-
-
 @click.command(cls=RichCommand)
 @click.argument("resource", metavar="<PATH or TEXT or '-'>", default="")
 @click.option(
@@ -410,35 +398,28 @@ def _list_profiles(ctx: click.Context, value: bool) -> None:
 @click.option("--pager", is_flag=True, help="Display in an interactive pager.")
 @click.option("--version", "-v", is_flag=True, help="Print version and exit.")
 @click.option(
-    "--list-profiles",
-    is_flag=True,
-    is_eager=True,
-    expose_value=False,
-    callback=lambda ctx, param, value: _list_profiles(ctx, value),
-    help="List all available configuration profiles.",
-)
-@click.option(
-    "--profile",
-    metavar="NAME",
+    "--csv-cols",
+    metavar="COLUMNS",
     default=None,
-    help="Apply configuration profile [b]NAME[/b].",
+    help="Select columns to display (comma-separated names or 0-based indices, e.g. 'Name,Age or 0,2). Requires --csv.",
 )
 @click.option(
-    "--ipynb-cell-type",
-    type=click.Choice(["all", "code", "markdown"]),
-    default="all",
-    help="Filter Jupyter notebook cells by type.",
-)
-@click.option(
-    "--ipynb-cell-range",
-    metavar="RANGE",
+    "--csv-max-col-width",
+    metavar="SIZE",
+    type=int,
     default=None,
-    help="Display cells in RANGE, e.g. '3' for first 3 cells, '2-5' for cells 2-5.",
+    help="Limit maximum column width to SIZE characters. Requires --csv.",
 )
 @click.option(
-    "--ipynb-no-output",
+    "--csv-hide-empty",
     is_flag=True,
-    help="Hide execution outputs in Jupyter notebook.",
+    help="Hide columns that are empty in all rows. Requires --csv.",
+)
+@click.option(
+    "--csv-sort",
+    metavar="COLUMN",
+    default=None,
+    help="Sort rows by COLUMN (name or 0-based index). Prefix with '~' for descending, e.g. '~Score'). Requires --csv.",
 )
 def main(
     resource: str,
@@ -484,46 +465,12 @@ def main(
     export_html: str = "",
     export_svg: str = "",
     pager: bool = False,
-    profile: Optional[str] = None,
-    ipynb_cell_type: str = "all",
-    ipynb_cell_range: Optional[str] = None,
-    ipynb_no_output: bool = False,
+    csv_cols: Optional[str] = None,
+    csv_max_col_width: Optional[int] = None,
+    csv_hide_empty: bool = False,
+    csv_sort: Optional[str] = None,
 ):
     """Rich toolbox for console output."""
-    if profile is not None:
-        from .config import get_profile
-        profile_data = get_profile(profile)
-        if profile_data is None:
-            from .config import get_profiles
-            available = ", ".join(sorted(get_profiles().keys()))
-            if available:
-                on_error(
-                    f"profile {profile!r} not found. Available profiles: {available}"
-                )
-            else:
-                from .config import PROFILES_FILE
-                on_error(
-                    f"profile {profile!r} not found. No profiles exist yet. "
-                    f"Create {PROFILES_FILE} with a [profiles.{profile}] section"
-                )
-
-        if "theme" in profile_data and not theme:
-            theme = profile_data["theme"]
-        if "hyperlinks" in profile_data and not hyperlinks:
-            hyperlinks = profile_data["hyperlinks"]
-        if "line_numbers" in profile_data and not line_numbers:
-            line_numbers = profile_data["line_numbers"]
-        if "guides" in profile_data and not guides:
-            guides = profile_data["guides"]
-        if "no_wrap" in profile_data and no_wrap is True:
-            no_wrap = profile_data["no_wrap"]
-        if "ipynb_cell_type" in profile_data and ipynb_cell_type == "all":
-            ipynb_cell_type = profile_data["ipynb_cell_type"]
-        if "ipynb_cell_range" in profile_data and ipynb_cell_range is None:
-            ipynb_cell_range = profile_data["ipynb_cell_range"]
-        if "ipynb_no_output" in profile_data and not ipynb_no_output:
-            ipynb_no_output = profile_data["ipynb_no_output"]
-
     if version:
         sys.stdout.write(f"{VERSION}\n")
         return
@@ -688,7 +635,17 @@ def main(
 
     elif resource_format == CSV:
 
-        renderable = render_csv(resource, head, tail, title, caption)
+        renderable = render_csv(
+            resource,
+            head,
+            tail,
+            title,
+            caption,
+            csv_cols,
+            csv_max_col_width,
+            csv_hide_empty,
+            csv_sort,
+        )
 
     elif resource_format == IPYNB:
 
@@ -702,9 +659,6 @@ def main(
             line_numbers,
             guides,
             no_wrap,
-            ipynb_cell_type,
-            ipynb_cell_range,
-            ipynb_no_output,
         )
 
     else:
@@ -823,6 +777,10 @@ def render_csv(
     tail: Optional[int] = None,
     title: Optional[str] = None,
     caption: Optional[str] = None,
+    csv_cols: Optional[str] = None,
+    csv_max_col_width: Optional[int] = None,
+    csv_hide_empty: bool = False,
+    csv_sort: Optional[str] = None,
 ) -> RenderableType:
     """Render resource as CSV.
 
@@ -832,32 +790,39 @@ def render_csv(
     Returns:
         RenderableType: Table renderable.
     """
-    import io
-    import csv
-    import re
     from rich import box
     from rich.table import Table
-    from operator import itemgetter
+    from .csv_tools import (
+        CsvError,
+        CsvParameterError,
+        load_csv_data,
+        prepare_csv_view,
+    )
 
-    is_number = re.compile(r"\-?[0-9]*?\.?[0-9]*?").fullmatch
-
-    csv_data, _ = read_resource(resource, "csv")
-    sniffer = csv.Sniffer()
     try:
-        dialect = sniffer.sniff(csv_data[:1024], delimiters=",\t|;")
-        has_header = sniffer.has_header(csv_data[:1024])
-    except csv.Error as error:
-        if resource.lower().endswith(".csv"):
-            dialect = csv.get_dialect("excel")
-            has_header = True
-        elif resource.lower().endswith(".tsv"):
-            dialect = csv.get_dialect("excel-tab")
-            has_header = True
-        else:
-            on_error(str(error))
+        csv_data = load_csv_data(resource, resource, read_resource)
+    except CsvError as error:
+        on_error(f"failed to parse CSV", error)
 
-    csv_file = io.StringIO(csv_data)
-    reader = csv.reader(csv_file, dialect=dialect)
+    try:
+        view = prepare_csv_view(
+            csv_data,
+            head=head,
+            tail=tail,
+            csv_cols=csv_cols,
+            csv_max_col_width=csv_max_col_width,
+            csv_hide_empty=csv_hide_empty,
+            csv_sort=csv_sort,
+        )
+    except CsvParameterError as error:
+        on_error(f"invalid CSV parameter", error)
+
+    has_header = view.header is not None
+    max_width = (
+        csv_max_col_width
+        if (csv_max_col_width is not None and csv_max_col_width > 0)
+        else None
+    )
 
     table = Table(
         show_header=has_header,
@@ -867,35 +832,22 @@ def render_csv(
         caption=caption,
         caption_justify="right",
     )
-    rows = iter(reader)
-    if has_header:
-        header = next(rows)
-        for column in header:
-            table.add_column(column)
 
-    table_rows = [row for row in rows if row]
-    if head is not None:
-        table_rows = table_rows[:head]
-    elif tail is not None:
-        table_rows = table_rows[-tail:]
-    for row in table_rows:
-        if row:
-            table.add_row(*row)
+    if has_header and view.header is not None:
+        for col_name in view.header:
+            table.add_column(col_name, max_width=max_width)
+    else:
+        for i in range(len(view.rows[0]) if view.rows else 0):
+            table.add_column(str(i), max_width=max_width)
 
-    for index, table_column in enumerate(table.columns):
-        get_index = itemgetter(index)
+    for row in view.rows:
+        table.add_row(*row)
 
-        for row in table_rows:
-            try:
-                value = get_index(row)
-                if value and not is_number(value):
-                    break
-            except Exception:
-                break
-        else:
-            table_column.justify = "right"
-            table_column.style = "bold green"
-            table_column.header_style = "bold green"
+    for display_idx in view.numeric_cols:
+        table_column = table.columns[display_idx]
+        table_column.justify = "right"
+        table_column.style = "bold green"
+        table_column.header_style = "bold green"
 
     return table
 
@@ -910,9 +862,6 @@ def render_ipynb(
     line_numbers: bool,
     guides: bool,
     no_wrap: bool,
-    cell_type: str = "all",
-    cell_range: Optional[str] = None,
-    no_output: bool = False,
 ) -> RenderableType:
     """Render resource as Jupyter notebook.
 
@@ -926,45 +875,80 @@ def render_ipynb(
         line_numbers (bool): Enable line number in code cells.
         guides (bool): Enable indentation guides in code cell syntax highlighting.
         no_wrap (bool): Don't word wrap syntax highlighted cells.
-        cell_type (str): Filter cells by type ('all', 'code', 'markdown').
-        cell_range (Optional[str]): Cell range to display, e.g. '3' or '2-5'.
-        no_output (bool): Hide execution outputs.
 
     Returns:
         RenderableType: Notebook as Markdown renderable.
     """
     import json
-    from .notebook import (
-        NotebookError,
-        parse_notebook,
-        render_notebook,
-    )
+    from rich.syntax import Syntax
+    from rich.console import Group
+    from rich.panel import Panel
+    from .markdown import Markdown
 
     notebook_str, _ = read_resource(resource, None)
+    notebook_dict = json.loads(notebook_str)
+    lexer = lexer or notebook_dict.get("metadata", {}).get("kernelspec", {}).get(
+        "language", ""
+    )
 
-    try:
-        notebook_dict = json.loads(notebook_str)
-    except json.JSONDecodeError as error:
-        on_error(f"not a valid JSON file: {error}")
+    renderable: RenderableType
+    new_line = True
+    cells: List[RenderableType] = []
+    for cell in notebook_dict["cells"]:
+        if new_line:
+            cells.append("")
+        if "execution_count" in cell:
+            execution_count = cell["execution_count"] or " "
+            cells.append(f"[green]In [[#66ff00]{execution_count}[/#66ff00]]:[/green]")
+        source = "".join(cell["source"])
+        if cell["cell_type"] == "code":
+            num_lines = len(source.splitlines())
+            line_range = _line_range(head, tail, num_lines)
+            renderable = Panel(
+                Syntax(
+                    source,
+                    lexer,
+                    theme=theme,
+                    line_numbers=line_numbers,
+                    indent_guides=guides,
+                    word_wrap=not no_wrap,
+                    line_range=line_range,
+                ),
+                border_style="dim",
+            )
+        elif cell["cell_type"] == "markdown":
+            renderable = Markdown(source, code_theme=theme, hyperlinks=hyperlinks)
+        else:
+            renderable = Text(source)
+        new_line = True
+        cells.append(renderable)
+        for output in cell.get("outputs", []):
+            output_type = output["output_type"]
+            if output_type == "stream":
+                renderable = Text.from_ansi("".join(output["text"]))
+                new_line = False
+            elif output_type == "error":
+                renderable = Text.from_ansi("\n".join(output["traceback"]).rstrip())
+                new_line = True
+            elif output_type == "execute_result":
+                execution_count = output.get("execution_count", " ") or " "
+                renderable = Text.from_markup(
+                    f"[red]Out[[#ee4b2b]{execution_count}[/#ee4b2b]]:[/red]\n"
+                )
+                data = output["data"].get("text/plain", "")
+                if isinstance(data, list):
+                    renderable += Text.from_ansi("".join(data))
+                else:
+                    renderable += Text.from_ansi(data)
+                new_line = True
+            else:
+                continue
 
-    try:
-        notebook = parse_notebook(notebook_dict)
-        return render_notebook(
-            notebook,
-            theme,
-            hyperlinks,
-            lexer,
-            head,
-            tail,
-            line_numbers,
-            guides,
-            no_wrap,
-            cell_type,
-            cell_range,
-            no_output,
-        )
-    except NotebookError as error:
-        on_error(str(error))
+            cells.append(renderable)
+
+    renderable = Group(*cells)
+
+    return renderable
 
 
 def _line_range(
