@@ -395,32 +395,38 @@ class RichCommand(click.Command):
 @click.option(
     "--export-svg", metavar="PATH", default="", help="Write SVG to [b]PATH[/b]."
 )
+@click.option(
+    "--export-meta",
+    is_flag=True,
+    help=(
+        "Emit export metadata (title, theme, source path, generated time) "
+        "as a header block in terminal rendering and in HTML/SVG export."
+    ),
+)
+@click.option(
+    "--export-source",
+    metavar="PATH",
+    default="",
+    help=(
+        "Override the source path shown in export metadata "
+        "(defaults to the resource argument)."
+    ),
+)
+@click.option(
+    "--no-export-time",
+    is_flag=True,
+    help="Omit the generated-time field from export metadata.",
+)
+@click.option(
+    "--export-inline-styles",
+    is_flag=True,
+    help=(
+        "Inline styles on every element when exporting HTML. "
+        "Produces larger but self-contained markup."
+    ),
+)
 @click.option("--pager", is_flag=True, help="Display in an interactive pager.")
 @click.option("--version", "-v", is_flag=True, help="Print version and exit.")
-@click.option(
-    "--csv-cols",
-    metavar="COLUMNS",
-    default=None,
-    help="Select columns to display (comma-separated names or 0-based indices, e.g. 'Name,Age or 0,2). Requires --csv.",
-)
-@click.option(
-    "--csv-max-col-width",
-    metavar="SIZE",
-    type=int,
-    default=None,
-    help="Limit maximum column width to SIZE characters. Requires --csv.",
-)
-@click.option(
-    "--csv-hide-empty",
-    is_flag=True,
-    help="Hide columns that are empty in all rows. Requires --csv.",
-)
-@click.option(
-    "--csv-sort",
-    metavar="COLUMN",
-    default=None,
-    help="Sort rows by COLUMN (name or 0-based index). Prefix with '~' for descending, e.g. '~Score'). Requires --csv.",
-)
 def main(
     resource: str,
     version: bool = False,
@@ -464,11 +470,11 @@ def main(
     force_terminal: bool = False,
     export_html: str = "",
     export_svg: str = "",
+    export_meta: bool = False,
+    export_source: str = "",
+    no_export_time: bool = False,
+    export_inline_styles: bool = False,
     pager: bool = False,
-    csv_cols: Optional[str] = None,
-    csv_max_col_width: Optional[int] = None,
-    csv_hide_empty: bool = False,
-    csv_sort: Optional[str] = None,
 ):
     """Rich toolbox for console output."""
     if version:
@@ -635,17 +641,7 @@ def main(
 
     elif resource_format == CSV:
 
-        renderable = render_csv(
-            resource,
-            head,
-            tail,
-            title,
-            caption,
-            csv_cols,
-            csv_max_col_width,
-            csv_hide_empty,
-            csv_sort,
-        )
+        renderable = render_csv(resource, head, tail, title, caption)
 
     elif resource_format == IPYNB:
 
@@ -725,6 +721,30 @@ def main(
     if width > 0 and not pager:
         renderable = ForceWidth(renderable, width=width)
 
+    from .export import (
+        ExportMetadata,
+        build_export_options,
+        build_export_targets,
+        save_exports,
+    )
+
+    export_options = build_export_options(
+        export_meta=export_meta,
+        title=title,
+        theme=theme,
+        resource=resource,
+        export_source=export_source,
+        no_export_time=no_export_time,
+        export_inline_styles=export_inline_styles,
+    )
+    if export_meta and export_options.has_metadata():
+        renderable = ExportMetadata(renderable, export_options)
+
+    export_targets = build_export_targets(
+        export_html=export_html,
+        export_svg=export_svg,
+    )
+
     justify = "default"
     if left:
         justify = "left"
@@ -758,17 +778,11 @@ def main(
         except Exception as error:
             on_error("failed to print resource", error)
 
-    if export_html:
-        try:
-            console.save_html(export_html, clear=False)
-        except Exception as error:
-            on_error("failed to save HTML", error)
-
-    if export_svg:
-        try:
-            console.save_svg(export_svg, clear=False)
-        except Exception as error:
-            on_error("failed to save SVG", error)
+    save_exports(
+        console,
+        export_options,
+        export_targets,
+    )
 
 
 def render_csv(
@@ -777,10 +791,6 @@ def render_csv(
     tail: Optional[int] = None,
     title: Optional[str] = None,
     caption: Optional[str] = None,
-    csv_cols: Optional[str] = None,
-    csv_max_col_width: Optional[int] = None,
-    csv_hide_empty: bool = False,
-    csv_sort: Optional[str] = None,
 ) -> RenderableType:
     """Render resource as CSV.
 
@@ -790,39 +800,32 @@ def render_csv(
     Returns:
         RenderableType: Table renderable.
     """
+    import io
+    import csv
+    import re
     from rich import box
     from rich.table import Table
-    from .csv_tools import (
-        CsvError,
-        CsvParameterError,
-        load_csv_data,
-        prepare_csv_view,
-    )
+    from operator import itemgetter
 
+    is_number = re.compile(r"\-?[0-9]*?\.?[0-9]*?").fullmatch
+
+    csv_data, _ = read_resource(resource, "csv")
+    sniffer = csv.Sniffer()
     try:
-        csv_data = load_csv_data(resource, resource, read_resource)
-    except CsvError as error:
-        on_error(f"failed to parse CSV", error)
+        dialect = sniffer.sniff(csv_data[:1024], delimiters=",\t|;")
+        has_header = sniffer.has_header(csv_data[:1024])
+    except csv.Error as error:
+        if resource.lower().endswith(".csv"):
+            dialect = csv.get_dialect("excel")
+            has_header = True
+        elif resource.lower().endswith(".tsv"):
+            dialect = csv.get_dialect("excel-tab")
+            has_header = True
+        else:
+            on_error(str(error))
 
-    try:
-        view = prepare_csv_view(
-            csv_data,
-            head=head,
-            tail=tail,
-            csv_cols=csv_cols,
-            csv_max_col_width=csv_max_col_width,
-            csv_hide_empty=csv_hide_empty,
-            csv_sort=csv_sort,
-        )
-    except CsvParameterError as error:
-        on_error(f"invalid CSV parameter", error)
-
-    has_header = view.header is not None
-    max_width = (
-        csv_max_col_width
-        if (csv_max_col_width is not None and csv_max_col_width > 0)
-        else None
-    )
+    csv_file = io.StringIO(csv_data)
+    reader = csv.reader(csv_file, dialect=dialect)
 
     table = Table(
         show_header=has_header,
@@ -832,22 +835,35 @@ def render_csv(
         caption=caption,
         caption_justify="right",
     )
+    rows = iter(reader)
+    if has_header:
+        header = next(rows)
+        for column in header:
+            table.add_column(column)
 
-    if has_header and view.header is not None:
-        for col_name in view.header:
-            table.add_column(col_name, max_width=max_width)
-    else:
-        for i in range(len(view.rows[0]) if view.rows else 0):
-            table.add_column(str(i), max_width=max_width)
+    table_rows = [row for row in rows if row]
+    if head is not None:
+        table_rows = table_rows[:head]
+    elif tail is not None:
+        table_rows = table_rows[-tail:]
+    for row in table_rows:
+        if row:
+            table.add_row(*row)
 
-    for row in view.rows:
-        table.add_row(*row)
+    for index, table_column in enumerate(table.columns):
+        get_index = itemgetter(index)
 
-    for display_idx in view.numeric_cols:
-        table_column = table.columns[display_idx]
-        table_column.justify = "right"
-        table_column.style = "bold green"
-        table_column.header_style = "bold green"
+        for row in table_rows:
+            try:
+                value = get_index(row)
+                if value and not is_number(value):
+                    break
+            except Exception:
+                break
+        else:
+            table_column.justify = "right"
+            table_column.style = "bold green"
+            table_column.header_style = "bold green"
 
     return table
 
