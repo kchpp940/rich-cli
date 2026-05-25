@@ -1,14 +1,14 @@
+from operator import itemgetter
 import sys
-from typing import TYPE_CHECKING, List, NamedTuple, NoReturn, Optional, Tuple
-
-if TYPE_CHECKING:
-    import csv
+from typing import TYPE_CHECKING, List, NoReturn, Optional, Tuple
 
 import click
 from pygments.util import ClassNotFound
 from rich.console import Console, RenderableType
 from rich.markup import escape
 from rich.text import Text
+
+from .win_vt import enable_windows_virtual_terminal_processing
 
 console = Console()
 error_console = Console(stderr=True)
@@ -260,11 +260,6 @@ class RichCommand(click.Command):
 @click.option("--markdown", "-m", is_flag=True, help="Display as [u]markdown[/u].")
 @click.option("--rst", is_flag=True, help="Display [u]restructured text[/u].")
 @click.option("--csv", is_flag=True, help="Display [u]CSV[/u] as a table.")
-@click.option(
-    "--csv-header/--no-csv-header",
-    default=None,
-    help="Treat first row as header (--csv-header) or not (--no-csv-header). Default: auto-detect.",
-)
 @click.option("--ipynb", is_flag=True, help="Display [u]Jupyter notebook[/u].")
 @click.option("--syntax", is_flag=True, help="[u]Syntax[/u] highlighting.")
 @click.option("--inspect", is_flag=True, help="[u]Inspect[/u] a python object.")
@@ -415,7 +410,6 @@ def main(
     markdown: bool = False,
     rst: bool = False,
     csv: bool = False,
-    csv_header: Optional[bool] = None,
     ipynb: bool = False,
     inspect: bool = True,
     emoji: bool = False,
@@ -615,7 +609,7 @@ def main(
 
     elif resource_format == CSV:
 
-        renderable = render_csv(resource, head, tail, title, caption, csv_header)
+        renderable = render_csv(resource, head, tail, title, caption)
 
     elif resource_format == IPYNB:
 
@@ -741,284 +735,85 @@ def main(
             on_error("failed to save SVG", error)
 
 
-class CsvParseResult(NamedTuple):
-    """Structured result from CSV/TSV parsing."""
-
-    dialect: Optional["csv.Dialect"]
-    has_header: bool
-    columns: List[str]
-    rows: List[List[str]]
-    empty: bool
-    dialect_source: str
-    header_source: str
-    padded_rows: int
-    parse_errors: int
-
-
-def _parse_csv_data(
-    resource: str,
-    head: Optional[int] = None,
-    tail: Optional[int] = None,
-    csv_header: Optional[bool] = None,
-) -> CsvParseResult:
-    """Parse CSV/TSV data and return structured results.
-
-    Args:
-        resource: Path or string content.
-        head: Limit to first N rows (excluding header if present).
-        tail: Limit to last N rows (excluding header if present).
-        csv_header: If True, treat first row as header. If False, do not.
-            If None, auto-detect.
-
-    Returns:
-        CsvParseResult with columns, rows, and status fields.
-    """
-    import io
-    import csv
-
-    csv_data, _ = read_resource(resource, "csv")
-
-    if not csv_data or not csv_data.strip():
-        return CsvParseResult(
-            dialect=None,
-            has_header=False,
-            columns=[],
-            rows=[],
-            empty=True,
-            dialect_source="",
-            header_source="",
-            padded_rows=0,
-            parse_errors=0,
-        )
-
-    sniffer = csv.Sniffer()
-    sample = csv_data[:8192] if len(csv_data) > 8192 else csv_data
-
-    dialect = None
-    dialect_source = "sniffed"
-    try:
-        dialect = sniffer.sniff(sample, delimiters=",\t|;")
-    except csv.Error:
-        dialect_source = "extension"
-        if resource.lower().endswith(".tsv"):
-            try:
-                dialect = csv.get_dialect("excel-tab")
-            except csv.Error:
-                dialect = csv.excel_tab
-        else:
-            try:
-                dialect = csv.get_dialect("excel")
-            except csv.Error:
-                dialect = csv.excel
-
-    has_header = False
-    header_source = "sniffed"
-    if csv_header is not None:
-        has_header = csv_header
-        header_source = "user"
-    else:
-        try:
-            has_header = sniffer.has_header(sample)
-        except csv.Error:
-            has_header = False
-            header_source = "assumed"
-
-    csv_file = io.StringIO(csv_data)
-    try:
-        reader = csv.reader(csv_file, dialect=dialect)
-    except TypeError:
-        reader = csv.reader(csv_file)
-
-    all_rows: List[List[str]] = []
-    parse_errors = 0
-    try:
-        for row in reader:
-            if row and any(cell.strip() for cell in row):
-                all_rows.append(row)
-    except csv.Error:
-        parse_errors = 1
-
-    if not all_rows:
-        return CsvParseResult(
-            dialect=dialect,
-            has_header=has_header,
-            columns=[],
-            rows=[],
-            empty=True,
-            dialect_source=dialect_source,
-            header_source=header_source,
-            padded_rows=0,
-            parse_errors=parse_errors,
-        )
-
-    if head is not None:
-        if has_header:
-            all_rows = all_rows[: head + 1]
-        else:
-            all_rows = all_rows[:head]
-    elif tail is not None:
-        if has_header:
-            all_rows = [all_rows[0]] + all_rows[-tail:]
-        else:
-            all_rows = all_rows[-tail:]
-
-    if has_header:
-        header_row = all_rows[0]
-        data_rows = all_rows[1:]
-    else:
-        header_row = None
-        data_rows = all_rows
-
-    max_cols = max((len(row) for row in all_rows), default=0)
-    if has_header and header_row:
-        max_cols = max(max_cols, len(header_row))
-
-    if has_header and header_row:
-        columns = header_row[:max_cols]
-        if len(columns) < max_cols:
-            columns = columns + [""] * (max_cols - len(columns))
-    else:
-        columns = [f"Column {i + 1}" for i in range(max_cols)]
-
-    padded_rows_list: List[List[str]] = []
-    padded_count = 0
-    for row in data_rows:
-        padded_row = row[:max_cols]
-        if len(padded_row) < max_cols:
-            padded_row = padded_row + [""] * (max_cols - len(padded_row))
-            padded_count += 1
-        padded_rows_list.append(padded_row)
-
-    return CsvParseResult(
-        dialect=dialect,
-        has_header=has_header,
-        columns=columns,
-        rows=padded_rows_list,
-        empty=False,
-        dialect_source=dialect_source,
-        header_source=header_source,
-        padded_rows=padded_count,
-        parse_errors=parse_errors,
-    )
-
-
 def render_csv(
     resource: str,
     head: Optional[int] = None,
     tail: Optional[int] = None,
     title: Optional[str] = None,
     caption: Optional[str] = None,
-    csv_header: Optional[bool] = None,
 ) -> RenderableType:
     """Render resource as CSV.
 
     Args:
         resource (str): Resource string.
-        csv_header: If True, treat first row as header. If False, do not.
-            If None, auto-detect.
 
     Returns:
         RenderableType: Table renderable.
     """
+    import io
+    import csv
     import re
     from rich import box
-    from rich.console import Group
     from rich.table import Table
     from operator import itemgetter
 
-    result = _parse_csv_data(resource, head, tail, csv_header)
-
-    if result.empty:
-        if not result.columns and not result.rows:
-            error_text = Text("(empty CSV file)", style="italic dim")
-        else:
-            error_text = Text("(no parseable CSV data)", style="italic dim")
-        return error_text
-
     is_number = re.compile(r"\-?[0-9]*?\.?[0-9]*?").fullmatch
 
+    csv_data, _ = read_resource(resource, "csv")
+    sniffer = csv.Sniffer()
+    try:
+        dialect = sniffer.sniff(csv_data[:1024], delimiters=",\t|;")
+        has_header = sniffer.has_header(csv_data[:1024])
+    except csv.Error as error:
+        if resource.lower().endswith(".csv"):
+            dialect = csv.get_dialect("excel")
+            has_header = True
+        elif resource.lower().endswith(".tsv"):
+            dialect = csv.get_dialect("excel-tab")
+            has_header = True
+        else:
+            on_error(str(error))
+
+    csv_file = io.StringIO(csv_data)
+    reader = csv.reader(csv_file, dialect=dialect)
+
     table = Table(
-        show_header=True,
-        box=box.HEAVY_HEAD if result.has_header else box.SQUARE,
+        show_header=has_header,
+        box=box.HEAVY_HEAD if has_header else box.SQUARE,
         border_style="blue",
         title=title,
         caption=caption,
         caption_justify="right",
     )
+    rows = iter(reader)
+    if has_header:
+        header = next(rows)
+        for column in header:
+            table.add_column(column)
 
-    for column in result.columns:
-        table.add_column(column)
-
-    for row in result.rows:
-        table.add_row(*row)
+    table_rows = [row for row in rows if row]
+    if head is not None:
+        table_rows = table_rows[:head]
+    elif tail is not None:
+        table_rows = table_rows[-tail:]
+    for row in table_rows:
+        if row:
+            table.add_row(*row)
 
     for index, table_column in enumerate(table.columns):
         get_index = itemgetter(index)
 
-        all_values = []
-        for row in result.rows:
+        for row in table_rows:
             try:
                 value = get_index(row)
-                all_values.append(value)
+                if value and not is_number(value):
+                    break
             except Exception:
-                all_values.append(None)
-
-        has_non_empty = any(v for v in all_values)
-        if not has_non_empty:
-            continue
-
-        all_numeric = True
-        for value in all_values:
-            if value and not is_number(value):
-                all_numeric = False
                 break
-        if all_numeric:
+        else:
             table_column.justify = "right"
             table_column.style = "bold green"
             table_column.header_style = "bold green"
-
-    status_messages: List[Text] = []
-
-    if result.dialect_source == "extension":
-        ext_msg = Text("Delimiter guessed from file extension (sniffing failed)", style="italic cyan")
-        status_messages.append(ext_msg)
-
-    if result.header_source == "user":
-        if result.has_header:
-            header_msg = Text(
-                "Treating first row as header (--csv-header)",
-                style="italic cyan",
-            )
-        else:
-            header_msg = Text(
-                "Not treating first row as header (--no-csv-header)",
-                style="italic cyan",
-            )
-        status_messages.append(header_msg)
-    elif not result.has_header:
-        header_msg = Text("No header row detected — using auto-generated column names", style="italic cyan")
-        status_messages.append(header_msg)
-    elif result.header_source == "assumed":
-        header_msg = Text("Header presence assumed (sniffing failed)", style="italic cyan")
-        status_messages.append(header_msg)
-
-    if result.padded_rows > 0:
-        pad_msg = Text(
-            f"{result.padded_rows} row(s) padded to match maximum column count",
-            style="italic yellow",
-        )
-        status_messages.append(pad_msg)
-
-    if result.parse_errors > 0:
-        parse_msg = Text(
-            f"{result.parse_errors} parse error(s) encountered — some rows may be missing",
-            style="italic yellow",
-        )
-        status_messages.append(parse_msg)
-
-    if status_messages:
-        renderables: List[RenderableType] = [table] + status_messages
-        return Group(*renderables)
 
     return table
 
@@ -1139,7 +934,8 @@ def _line_range(
 
 
 def run():
-    main()
+    with enable_windows_virtual_terminal_processing():
+        main()
 
 
 if __name__ == "__main__":
