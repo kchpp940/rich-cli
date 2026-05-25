@@ -8,8 +8,6 @@ from rich.console import Console, RenderableType
 from rich.markup import escape
 from rich.text import Text
 
-from .config import apply_profile_defaults, get_effective_params, load_config
-
 console = Console()
 error_console = Console(stderr=True)
 
@@ -246,20 +244,19 @@ class RichCommand(click.Command):
         )
 
 
-@click.command(cls=RichCommand, context_settings={"obj": {}})
-@click.pass_context
-@click.option(
-    "--profile",
-    metavar="NAME",
-    is_eager=True,
-    help="Use a named [u]profile[/u] from the config file.",
-)
-@click.option(
-    "--list-profiles",
-    is_flag=True,
-    is_eager=True,
-    help="List all available profiles and exit.",
-)
+def _list_profiles(ctx: click.Context, value: bool) -> None:
+    """List all available profiles and exit."""
+    if not value or ctx.resilient_parsing:
+        return
+    from .config import format_profiles_list
+    from rich.console import Console
+
+    console = Console()
+    console.print(format_profiles_list(), markup=True)
+    ctx.exit()
+
+
+@click.command(cls=RichCommand)
 @click.argument("resource", metavar="<PATH or TEXT or '-'>", default="")
 @click.option(
     "--print",
@@ -412,12 +409,40 @@ class RichCommand(click.Command):
 )
 @click.option("--pager", is_flag=True, help="Display in an interactive pager.")
 @click.option("--version", "-v", is_flag=True, help="Print version and exit.")
+@click.option(
+    "--list-profiles",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=lambda ctx, param, value: _list_profiles(ctx, value),
+    help="List all available configuration profiles.",
+)
+@click.option(
+    "--profile",
+    metavar="NAME",
+    default=None,
+    help="Apply configuration profile [b]NAME[/b].",
+)
+@click.option(
+    "--ipynb-cell-type",
+    type=click.Choice(["all", "code", "markdown"]),
+    default="all",
+    help="Filter Jupyter notebook cells by type.",
+)
+@click.option(
+    "--ipynb-cell-range",
+    metavar="RANGE",
+    default=None,
+    help="Display cells in RANGE, e.g. '3' for first 3 cells, '2-5' for cells 2-5.",
+)
+@click.option(
+    "--ipynb-no-output",
+    is_flag=True,
+    help="Hide execution outputs in Jupyter notebook.",
+)
 def main(
-    ctx: click.Context,
     resource: str,
     version: bool = False,
-    profile: Optional[str] = None,
-    list_profiles: bool = False,
     _print: bool = False,
     syntax: bool = False,
     rule: bool = False,
@@ -459,164 +484,49 @@ def main(
     export_html: str = "",
     export_svg: str = "",
     pager: bool = False,
+    profile: Optional[str] = None,
+    ipynb_cell_type: str = "all",
+    ipynb_cell_range: Optional[str] = None,
+    ipynb_no_output: bool = False,
 ):
     """Rich toolbox for console output."""
+    if profile is not None:
+        from .config import get_profile
+        profile_data = get_profile(profile)
+        if profile_data is None:
+            from .config import get_profiles
+            available = ", ".join(sorted(get_profiles().keys()))
+            if available:
+                on_error(
+                    f"profile {profile!r} not found. Available profiles: {available}"
+                )
+            else:
+                from .config import PROFILES_FILE
+                on_error(
+                    f"profile {profile!r} not found. No profiles exist yet. "
+                    f"Create {PROFILES_FILE} with a [profiles.{profile}] section"
+                )
+
+        if "theme" in profile_data and not theme:
+            theme = profile_data["theme"]
+        if "hyperlinks" in profile_data and not hyperlinks:
+            hyperlinks = profile_data["hyperlinks"]
+        if "line_numbers" in profile_data and not line_numbers:
+            line_numbers = profile_data["line_numbers"]
+        if "guides" in profile_data and not guides:
+            guides = profile_data["guides"]
+        if "no_wrap" in profile_data and no_wrap is True:
+            no_wrap = profile_data["no_wrap"]
+        if "ipynb_cell_type" in profile_data and ipynb_cell_type == "all":
+            ipynb_cell_type = profile_data["ipynb_cell_type"]
+        if "ipynb_cell_range" in profile_data and ipynb_cell_range is None:
+            ipynb_cell_range = profile_data["ipynb_cell_range"]
+        if "ipynb_no_output" in profile_data and not ipynb_no_output:
+            ipynb_no_output = profile_data["ipynb_no_output"]
+
     if version:
         sys.stdout.write(f"{VERSION}\n")
         return
-    if list_profiles:
-        config = load_config()
-        profiles = config.list_profiles()
-        if not profiles:
-            error_console.print("[yellow]No profiles configured.[/yellow]")
-            error_console.print(
-                "[dim]Create a config file at ~/.rich-cli.toml or ./.rich-cli.toml "
-                "with [profiles.<name>] sections.[/dim]"
-            )
-            return
-        from rich.table import Table
-
-        table = Table(
-            title="Available Profiles",
-            box=None,
-            show_header=True,
-            header_style="bold cyan",
-        )
-        table.add_column("Profile", style="bold green")
-        table.add_column("Options", style="dim")
-
-        for profile_name in profiles:
-            prof = config.get_profile(profile_name)
-            if prof is not None:
-                options_str = ", ".join(
-                    f"{k}={v}" for k, v in sorted(prof.options.items())
-                )
-                table.add_row(profile_name, options_str or "(no options)")
-
-        _console = Console()
-        _console.print(table)
-        if config.source_files:
-            _console.print(
-                f"\n[dim]Config loaded from: {', '.join(str(p) for p in config.source_files)}[/dim]"
-            )
-        return
-
-    if profile:
-        _config = load_config()
-        _profile = _config.get_profile(profile)
-
-        if _profile is None:
-            _available = ", ".join(_config.list_profiles())
-            if _available:
-                raise click.BadParameter(
-                    f"profile '{profile}' not found. Available profiles: {_available}"
-                )
-            else:
-                raise click.BadParameter(
-                    f"profile '{profile}' not found. No profiles configured."
-                )
-
-        _param_values = {
-            "resource": resource,
-            "version": version,
-            "profile": profile,
-            "list_profiles": list_profiles,
-            "_print": _print,
-            "syntax": syntax,
-            "rule": rule,
-            "rule_char": rule_char,
-            "json": json,
-            "markdown": markdown,
-            "rst": rst,
-            "csv": csv,
-            "ipynb": ipynb,
-            "inspect": inspect,
-            "emoji": emoji,
-            "left": left,
-            "right": right,
-            "center": center,
-            "text_left": text_left,
-            "text_right": text_right,
-            "text_center": text_center,
-            "soft": soft,
-            "head": head,
-            "tail": tail,
-            "text_full": text_full,
-            "expand": expand,
-            "width": width,
-            "max_width": max_width,
-            "style": style,
-            "rule_style": rule_style,
-            "no_wrap": no_wrap,
-            "padding": padding,
-            "panel": panel,
-            "panel_style": panel_style,
-            "title": title,
-            "caption": caption,
-            "theme": theme,
-            "line_numbers": line_numbers,
-            "guides": guides,
-            "lexer": lexer,
-            "hyperlinks": hyperlinks,
-            "force_terminal": force_terminal,
-            "export_html": export_html,
-            "export_svg": export_svg,
-            "pager": pager,
-        }
-
-        _param_sources = {}
-        for _param_name in _param_values:
-            try:
-                _param_sources[_param_name] = ctx.get_parameter_source(_param_name)
-            except ValueError:
-                pass
-
-        _effective = get_effective_params(_profile, _param_values, _param_sources)
-        version = _effective["version"]
-        profile = _effective["profile"]
-        list_profiles = _effective["list_profiles"]
-        _print = _effective["_print"]
-        syntax = _effective["syntax"]
-        rule = _effective["rule"]
-        rule_char = _effective["rule_char"]
-        json = _effective["json"]
-        markdown = _effective["markdown"]
-        rst = _effective["rst"]
-        csv = _effective["csv"]
-        ipynb = _effective["ipynb"]
-        inspect = _effective["inspect"]
-        emoji = _effective["emoji"]
-        left = _effective["left"]
-        right = _effective["right"]
-        center = _effective["center"]
-        text_left = _effective["text_left"]
-        text_right = _effective["text_right"]
-        text_center = _effective["text_center"]
-        soft = _effective["soft"]
-        head = _effective["head"]
-        tail = _effective["tail"]
-        text_full = _effective["text_full"]
-        expand = _effective["expand"]
-        width = _effective["width"]
-        max_width = _effective["max_width"]
-        style = _effective["style"]
-        rule_style = _effective["rule_style"]
-        no_wrap = _effective["no_wrap"]
-        padding = _effective["padding"]
-        panel = _effective["panel"]
-        panel_style = _effective["panel_style"]
-        title = _effective["title"]
-        caption = _effective["caption"]
-        theme = _effective["theme"]
-        line_numbers = _effective["line_numbers"]
-        guides = _effective["guides"]
-        lexer = _effective["lexer"]
-        hyperlinks = _effective["hyperlinks"]
-        force_terminal = _effective["force_terminal"]
-        export_html = _effective["export_html"]
-        export_svg = _effective["export_svg"]
-        pager = _effective["pager"]
-
     console = Console(
         emoji=emoji,
         record=bool(export_html or export_svg),
@@ -792,6 +702,9 @@ def main(
             line_numbers,
             guides,
             no_wrap,
+            ipynb_cell_type,
+            ipynb_cell_range,
+            ipynb_no_output,
         )
 
     else:
@@ -997,6 +910,9 @@ def render_ipynb(
     line_numbers: bool,
     guides: bool,
     no_wrap: bool,
+    cell_type: str = "all",
+    cell_range: Optional[str] = None,
+    no_output: bool = False,
 ) -> RenderableType:
     """Render resource as Jupyter notebook.
 
@@ -1010,80 +926,45 @@ def render_ipynb(
         line_numbers (bool): Enable line number in code cells.
         guides (bool): Enable indentation guides in code cell syntax highlighting.
         no_wrap (bool): Don't word wrap syntax highlighted cells.
+        cell_type (str): Filter cells by type ('all', 'code', 'markdown').
+        cell_range (Optional[str]): Cell range to display, e.g. '3' or '2-5'.
+        no_output (bool): Hide execution outputs.
 
     Returns:
         RenderableType: Notebook as Markdown renderable.
     """
     import json
-    from rich.syntax import Syntax
-    from rich.console import Group
-    from rich.panel import Panel
-    from .markdown import Markdown
-
-    notebook_str, _ = read_resource(resource, None)
-    notebook_dict = json.loads(notebook_str)
-    lexer = lexer or notebook_dict.get("metadata", {}).get("kernelspec", {}).get(
-        "language", ""
+    from .notebook import (
+        NotebookError,
+        parse_notebook,
+        render_notebook,
     )
 
-    renderable: RenderableType
-    new_line = True
-    cells: List[RenderableType] = []
-    for cell in notebook_dict["cells"]:
-        if new_line:
-            cells.append("")
-        if "execution_count" in cell:
-            execution_count = cell["execution_count"] or " "
-            cells.append(f"[green]In [[#66ff00]{execution_count}[/#66ff00]]:[/green]")
-        source = "".join(cell["source"])
-        if cell["cell_type"] == "code":
-            num_lines = len(source.splitlines())
-            line_range = _line_range(head, tail, num_lines)
-            renderable = Panel(
-                Syntax(
-                    source,
-                    lexer,
-                    theme=theme,
-                    line_numbers=line_numbers,
-                    indent_guides=guides,
-                    word_wrap=not no_wrap,
-                    line_range=line_range,
-                ),
-                border_style="dim",
-            )
-        elif cell["cell_type"] == "markdown":
-            renderable = Markdown(source, code_theme=theme, hyperlinks=hyperlinks)
-        else:
-            renderable = Text(source)
-        new_line = True
-        cells.append(renderable)
-        for output in cell.get("outputs", []):
-            output_type = output["output_type"]
-            if output_type == "stream":
-                renderable = Text.from_ansi("".join(output["text"]))
-                new_line = False
-            elif output_type == "error":
-                renderable = Text.from_ansi("\n".join(output["traceback"]).rstrip())
-                new_line = True
-            elif output_type == "execute_result":
-                execution_count = output.get("execution_count", " ") or " "
-                renderable = Text.from_markup(
-                    f"[red]Out[[#ee4b2b]{execution_count}[/#ee4b2b]]:[/red]\n"
-                )
-                data = output["data"].get("text/plain", "")
-                if isinstance(data, list):
-                    renderable += Text.from_ansi("".join(data))
-                else:
-                    renderable += Text.from_ansi(data)
-                new_line = True
-            else:
-                continue
+    notebook_str, _ = read_resource(resource, None)
 
-            cells.append(renderable)
+    try:
+        notebook_dict = json.loads(notebook_str)
+    except json.JSONDecodeError as error:
+        on_error(f"not a valid JSON file: {error}")
 
-    renderable = Group(*cells)
-
-    return renderable
+    try:
+        notebook = parse_notebook(notebook_dict)
+        return render_notebook(
+            notebook,
+            theme,
+            hyperlinks,
+            lexer,
+            head,
+            tail,
+            line_numbers,
+            guides,
+            no_wrap,
+            cell_type,
+            cell_range,
+            no_output,
+        )
+    except NotebookError as error:
+        on_error(str(error))
 
 
 def _line_range(
