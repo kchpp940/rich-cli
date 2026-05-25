@@ -1,14 +1,13 @@
 from operator import itemgetter
 import sys
 from typing import TYPE_CHECKING, List, NoReturn, Optional, Tuple
+import optparse
 
 import click
 from pygments.util import ClassNotFound
 from rich.console import Console, RenderableType
 from rich.markup import escape
 from rich.text import Text
-
-from .win_vt import enable_windows_virtual_terminal_processing
 
 console = Console()
 error_console = Console(stderr=True)
@@ -289,7 +288,7 @@ class RichCommand(click.Command):
 @click.option("--text-right", "-R", is_flag=True, help="Justify text to right.")
 @click.option("--text-center", "-C", is_flag=True, help="Justify text to center.")
 @click.option(
-    "--text-full", "-F", is_flag=True, help="Justify text to both left and right edges."
+    "--text-full", is_flag=True, help="Justify text to both left and right edges."
 )
 @click.option(
     "--soft", is_flag=True, help="Enable soft wrapping of text (requires --print)."
@@ -384,8 +383,22 @@ class RichCommand(click.Command):
 )
 @click.option(
     "--force-terminal",
+    "-f",
     is_flag=True,
-    help="Force terminal output when not writing to a terminal.",
+    help="Force terminal output (preserve ANSI colors) when not writing to a terminal.",
+)
+@click.option(
+    "-F",
+    "_F_deprecated",
+    is_flag=True,
+    help=optparse.SUPPRESS_HELP,
+    callback=lambda ctx, param, value: (
+        on_error("-F has been removed. Use -f/--force-terminal to preserve ANSI colors in piped output, or --text-full for full text justification.")
+        if value
+        else None
+    ),
+    expose_value=False,
+    is_eager=True,
 )
 @click.option(
     "--export-html",
@@ -934,8 +947,7 @@ def _line_range(
 
 
 def run():
-    with enable_windows_virtual_terminal_processing():
-        main()
+    main()
 
 
 if __name__ == "__main__":
