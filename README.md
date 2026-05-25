@@ -193,7 +193,7 @@ Rich will word wrap your text by default by inserting newlines where appropriate
 
 Where `rich` accepts a path, you can enter `-` which reads the content from stdin. You may want this if you are piping output from another process.
 
-Note that when rich isn't writing directly to the terminal it will disable ansi color codes, so you may want to add `--force-terminal` or `-f` to tell `rich` you want to keep ansi codes in the output.
+Note that when rich isn't writing directly to the terminal it will disable ansi color codes, so you may want to add `--force-terminal` or `-F` to tell `rich` you want to keep ansi codes in the output.
 
 ```
 cat README.md | rich - --markdown --force-terminal
@@ -235,17 +235,17 @@ rich "I must not fear. Fear is the mind-killer. Fear is the little-death that br
 
 ### Text Justify
 
-You can set how `rich` will justify text with `--text-left`, `--text-right`, `--text-center`, and `--text-full`; or the single letter equivalents: `-L`, `-R`, and `-C`.
+You can set how `rich` will justify text with `--text-left`, `--text-right`, `--text-center`, and `--text-full`; or the single letter equivalents: `-L`, `-R`, `-C`, and `-F`.
 
 The difference between `--left` and `--text-left` may not be obvious unless you specify the width of the output. The `--left`, `--center`, and `--right` options will center the block of text within the terminal dimensions. Whereas, the `--text-left`, `--text-center`, and `--text-right` options define how text is rendered _within_ that block.
 
-In the following examples, we specify a width of 40 (`-w 40`) which is center aligned with the `-c` switch. Note how the `-R`, `-C` and `--text-full` apply the text justification within the 40 character block:
+In the following examples, we specify a width of 40 (`-w 40`) which is center aligned with the `-c` switch. Note how the `-R`, `-C` and `-F` apply the text justification within the 40 character block:
 
 ```
 rich "I must not fear. Fear is the mind-killer. Fear is the little-death that brings total obliteration." -p -w 40 -c -L
 rich "I must not fear. Fear is the mind-killer. Fear is the little-death that brings total obliteration." -p -w 40 -c -R
 rich "I must not fear. Fear is the mind-killer. Fear is the little-death that brings total obliteration." -p -w 40 -c -C
-rich "I must not fear. Fear is the mind-killer. Fear is the little-death that brings total obliteration." -p -w 40 -c --text-full
+rich "I must not fear. Fear is the mind-killer. Fear is the little-death that brings total obliteration." -p -w 40 -c -F
 ```
 
 ### Padding
@@ -267,3 +267,118 @@ rich "Hello, [b]World[/b]!" -p -a heavy
 ```
 
 ![panel1](https://raw.githubusercontent.com/Textualize/rich-cli/main/imgs/panel1.png)
+
+## Profiles
+
+You can define reusable parameter presets (called "profiles") in a TOML configuration file. Profiles allow you to save frequently used combinations of options like themes, width, panel style, export format, and pager behavior.
+
+### Config File Locations
+
+Rich-CLI searches for config files in the following locations (later files override earlier ones for profiles with the same name):
+
+1. **System-wide**: `/etc/rich-cli/config.toml` (Linux/macOS)
+2. **User-wide**: `~/.config/rich-cli/config.toml` (Linux/macOS) or `~/.rich-cli.toml` (cross-platform)
+3. **Project-local**: `.rich-cli.toml` in the current working directory
+
+### Profile Configuration
+
+Profiles are defined under `[profiles.<name>]` sections in the TOML file. Option names use kebab-case (e.g., `line-numbers` instead of `line_numbers`).
+
+Create a file at `~/.rich-cli.toml` with the following content to get started:
+
+```toml
+[profiles.dark-code]
+theme = "monokai"
+line-numbers = true
+guides = true
+width = 100
+panel = "rounded"
+panel-style = "blue"
+
+[profiles.blog]
+markdown = true
+theme = "github-dark"
+width = 80
+hyperlinks = true
+export-html = "output.html"
+
+[profiles.presentation]
+print = true
+theme = "solarized-dark"
+style = "on bright_black"
+width = 120
+padding = "2,4"
+panel = "heavy"
+panel-style = "magenta"
+emoji = true
+
+[profiles.less]
+theme = "ansi-dark"
+line-numbers = true
+guides = true
+pager = true
+no-wrap = false
+
+[profiles.export-svg]
+theme = "dracula"
+line-numbers = true
+width = 120
+export-svg = "code.svg"
+panel = "rounded"
+```
+
+### Using Profiles
+
+Use the `--profile <name>` option to activate a profile:
+
+```bash
+# Use the dark-code profile for syntax highlighting
+rich main.py --profile dark-code
+
+# Use the blog profile for rendering markdown
+rich README.md --profile blog
+
+# Use the pager profile for browsing large files
+rich src/rich_cli/__main__.py --profile less
+```
+
+### Overriding Profile Values
+
+Command-line arguments always take precedence over profile values. You can override any option from the profile:
+
+```bash
+# Use dark-code profile but change theme and disable line numbers
+rich main.py --profile dark-code --theme dracula --no-line-numbers
+
+# Use blog profile but export to a different file
+rich README.md --profile blog --export-html my-blog-post.html
+```
+
+### Listing Available Profiles
+
+To see all configured profiles:
+
+```bash
+rich --list-profiles
+```
+
+This will display a table with profile names and their configured options, along with the config files that were loaded.
+
+### Supported Profile Options
+
+Almost all CLI options can be set in a profile:
+
+| Category | Options |
+|----------|---------|
+| **Format** | `print`, `syntax`, `markdown`, `json`, `csv`, `ipynb`, `rst`, `rule`, `inspect` |
+| **Themes** | `theme`, `lexer` |
+| **Layout** | `width`, `max-width`, `padding`, `expand`, `left`, `right`, `center` |
+| **Text** | `text-left`, `text-right`, `text-center`, `text-full`, `soft`, `style`, `emoji` |
+| **Panel** | `panel`, `panel-style`, `title`, `caption` |
+| **Syntax** | `line-numbers`, `guides`, `no-wrap`, `head`, `tail` |
+| **Rule** | `rule-style`, `rule-char` |
+| **Markdown** | `hyperlinks` |
+| **Export** | `export-html`, `export-svg` |
+| **Other** | `force-terminal`, `pager` |
+
+> **Note**: Boolean options in TOML are `true` or `false` (e.g., `line-numbers = true`).

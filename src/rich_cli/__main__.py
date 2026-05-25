@@ -1,13 +1,14 @@
 from operator import itemgetter
 import sys
 from typing import TYPE_CHECKING, List, NoReturn, Optional, Tuple
-import optparse
 
 import click
 from pygments.util import ClassNotFound
 from rich.console import Console, RenderableType
 from rich.markup import escape
 from rich.text import Text
+
+from .config import apply_profile_defaults, get_effective_params, load_config
 
 console = Console()
 error_console = Console(stderr=True)
@@ -245,7 +246,20 @@ class RichCommand(click.Command):
         )
 
 
-@click.command(cls=RichCommand)
+@click.command(cls=RichCommand, context_settings={"obj": {}})
+@click.pass_context
+@click.option(
+    "--profile",
+    metavar="NAME",
+    is_eager=True,
+    help="Use a named [u]profile[/u] from the config file.",
+)
+@click.option(
+    "--list-profiles",
+    is_flag=True,
+    is_eager=True,
+    help="List all available profiles and exit.",
+)
 @click.argument("resource", metavar="<PATH or TEXT or '-'>", default="")
 @click.option(
     "--print",
@@ -288,7 +302,7 @@ class RichCommand(click.Command):
 @click.option("--text-right", "-R", is_flag=True, help="Justify text to right.")
 @click.option("--text-center", "-C", is_flag=True, help="Justify text to center.")
 @click.option(
-    "--text-full", is_flag=True, help="Justify text to both left and right edges."
+    "--text-full", "-F", is_flag=True, help="Justify text to both left and right edges."
 )
 @click.option(
     "--soft", is_flag=True, help="Enable soft wrapping of text (requires --print)."
@@ -383,22 +397,8 @@ class RichCommand(click.Command):
 )
 @click.option(
     "--force-terminal",
-    "-f",
     is_flag=True,
-    help="Force terminal output (preserve ANSI colors) when not writing to a terminal.",
-)
-@click.option(
-    "-F",
-    "_F_deprecated",
-    is_flag=True,
-    help=optparse.SUPPRESS_HELP,
-    callback=lambda ctx, param, value: (
-        on_error("-F has been removed. Use -f/--force-terminal to preserve ANSI colors in piped output, or --text-full for full text justification.")
-        if value
-        else None
-    ),
-    expose_value=False,
-    is_eager=True,
+    help="Force terminal output when not writing to a terminal.",
 )
 @click.option(
     "--export-html",
@@ -413,8 +413,11 @@ class RichCommand(click.Command):
 @click.option("--pager", is_flag=True, help="Display in an interactive pager.")
 @click.option("--version", "-v", is_flag=True, help="Print version and exit.")
 def main(
+    ctx: click.Context,
     resource: str,
     version: bool = False,
+    profile: Optional[str] = None,
+    list_profiles: bool = False,
     _print: bool = False,
     syntax: bool = False,
     rule: bool = False,
@@ -461,6 +464,159 @@ def main(
     if version:
         sys.stdout.write(f"{VERSION}\n")
         return
+    if list_profiles:
+        config = load_config()
+        profiles = config.list_profiles()
+        if not profiles:
+            error_console.print("[yellow]No profiles configured.[/yellow]")
+            error_console.print(
+                "[dim]Create a config file at ~/.rich-cli.toml or ./.rich-cli.toml "
+                "with [profiles.<name>] sections.[/dim]"
+            )
+            return
+        from rich.table import Table
+
+        table = Table(
+            title="Available Profiles",
+            box=None,
+            show_header=True,
+            header_style="bold cyan",
+        )
+        table.add_column("Profile", style="bold green")
+        table.add_column("Options", style="dim")
+
+        for profile_name in profiles:
+            prof = config.get_profile(profile_name)
+            if prof is not None:
+                options_str = ", ".join(
+                    f"{k}={v}" for k, v in sorted(prof.options.items())
+                )
+                table.add_row(profile_name, options_str or "(no options)")
+
+        _console = Console()
+        _console.print(table)
+        if config.source_files:
+            _console.print(
+                f"\n[dim]Config loaded from: {', '.join(str(p) for p in config.source_files)}[/dim]"
+            )
+        return
+
+    if profile:
+        _config = load_config()
+        _profile = _config.get_profile(profile)
+
+        if _profile is None:
+            _available = ", ".join(_config.list_profiles())
+            if _available:
+                raise click.BadParameter(
+                    f"profile '{profile}' not found. Available profiles: {_available}"
+                )
+            else:
+                raise click.BadParameter(
+                    f"profile '{profile}' not found. No profiles configured."
+                )
+
+        _param_values = {
+            "resource": resource,
+            "version": version,
+            "profile": profile,
+            "list_profiles": list_profiles,
+            "_print": _print,
+            "syntax": syntax,
+            "rule": rule,
+            "rule_char": rule_char,
+            "json": json,
+            "markdown": markdown,
+            "rst": rst,
+            "csv": csv,
+            "ipynb": ipynb,
+            "inspect": inspect,
+            "emoji": emoji,
+            "left": left,
+            "right": right,
+            "center": center,
+            "text_left": text_left,
+            "text_right": text_right,
+            "text_center": text_center,
+            "soft": soft,
+            "head": head,
+            "tail": tail,
+            "text_full": text_full,
+            "expand": expand,
+            "width": width,
+            "max_width": max_width,
+            "style": style,
+            "rule_style": rule_style,
+            "no_wrap": no_wrap,
+            "padding": padding,
+            "panel": panel,
+            "panel_style": panel_style,
+            "title": title,
+            "caption": caption,
+            "theme": theme,
+            "line_numbers": line_numbers,
+            "guides": guides,
+            "lexer": lexer,
+            "hyperlinks": hyperlinks,
+            "force_terminal": force_terminal,
+            "export_html": export_html,
+            "export_svg": export_svg,
+            "pager": pager,
+        }
+
+        _param_sources = {}
+        for _param_name in _param_values:
+            try:
+                _param_sources[_param_name] = ctx.get_parameter_source(_param_name)
+            except ValueError:
+                pass
+
+        _effective = get_effective_params(_profile, _param_values, _param_sources)
+        version = _effective["version"]
+        profile = _effective["profile"]
+        list_profiles = _effective["list_profiles"]
+        _print = _effective["_print"]
+        syntax = _effective["syntax"]
+        rule = _effective["rule"]
+        rule_char = _effective["rule_char"]
+        json = _effective["json"]
+        markdown = _effective["markdown"]
+        rst = _effective["rst"]
+        csv = _effective["csv"]
+        ipynb = _effective["ipynb"]
+        inspect = _effective["inspect"]
+        emoji = _effective["emoji"]
+        left = _effective["left"]
+        right = _effective["right"]
+        center = _effective["center"]
+        text_left = _effective["text_left"]
+        text_right = _effective["text_right"]
+        text_center = _effective["text_center"]
+        soft = _effective["soft"]
+        head = _effective["head"]
+        tail = _effective["tail"]
+        text_full = _effective["text_full"]
+        expand = _effective["expand"]
+        width = _effective["width"]
+        max_width = _effective["max_width"]
+        style = _effective["style"]
+        rule_style = _effective["rule_style"]
+        no_wrap = _effective["no_wrap"]
+        padding = _effective["padding"]
+        panel = _effective["panel"]
+        panel_style = _effective["panel_style"]
+        title = _effective["title"]
+        caption = _effective["caption"]
+        theme = _effective["theme"]
+        line_numbers = _effective["line_numbers"]
+        guides = _effective["guides"]
+        lexer = _effective["lexer"]
+        hyperlinks = _effective["hyperlinks"]
+        force_terminal = _effective["force_terminal"]
+        export_html = _effective["export_html"]
+        export_svg = _effective["export_svg"]
+        pager = _effective["pager"]
+
     console = Console(
         emoji=emoji,
         record=bool(export_html or export_svg),

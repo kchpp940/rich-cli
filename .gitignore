@@ -128,3 +128,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Rich-CLI local profile config
+.rich-cli.toml
