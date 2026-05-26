@@ -108,78 +108,8 @@ You can request Jupyter notebook rendering by adding the `--ipynb` switch. If th
 rich notebook.ipynb
 ```
 
-All options that apply to syntax highlighting (`--theme`, `--line-numbers`, `--guides`, `--lexer`, `--head`, `--tail`, `--no-wrap`) can be applied to code cells, and all options that apply to Markdown (`--hyperlinks`) can be applied to Markdown cells.
-
-### Filtering cells
-
-Notebook rendering is built as a four-layer pipeline (parse → filter → transform → render) operating on a shared data model, so all filtering options work uniformly across cell types.
-
-#### By cell type
-
-Use `--ipynb-cell-types` to filter by cell type (comma-separated list):
-
-```
-# Show only code cells
-rich notebook.ipynb --ipynb-cell-types code
-
-# Show only Markdown cells (great for reading documentation)
-rich notebook.ipynb --ipynb-cell-types markdown
-
-# Show code and Markdown, skip raw cells
-rich notebook.ipynb --ipynb-cell-types code,markdown
-```
-
-#### By cell range
-
-Use `--ipynb-cell-range` to select a subset of cells (1-based, inclusive):
-
-```
-# Show first 5 cells
-rich notebook.ipynb --ipynb-cell-range 1-5
-
-# Show from cell 3 onward
-rich notebook.ipynb --ipynb-cell-range 3-
-
-# Show up to cell 10
-rich notebook.ipynb --ipynb-cell-range -10
-```
-
-#### Hide outputs
-
-Use `--ipynb-no-outputs` to hide all cell outputs (useful for reviewing just the code):
-
-```
-rich notebook.ipynb --ipynb-no-outputs
-```
-
-### Profile examples
-
-Here are common combinations (profiles) for typical use cases. These options compose with all existing Rich CLI options (`--theme`, `--pager`, `--panel`, etc.) because they operate on the same notebook data model:
-
-**Code review profile** — only code cells with line numbers and indentation guides:
-```
-rich notebook.ipynb --ipynb-cell-types code --ipynb-no-outputs -n -g --theme monokai
-```
-
-**Reading profile** — only Markdown and code, with hyperlinks and a monochrome theme:
-```
-rich notebook.ipynb --ipynb-cell-types markdown,code --hyperlinks --theme bw
-```
-
-**Presentation profile** — first 10 cells in a heavy panel, with a title:
-```
-rich notebook.ipynb --ipynb-cell-range 1-10 -a heavy --title "Notebook Highlights"
-```
-
-**Pager profile** — full notebook in the interactive pager with line numbers:
-```
-rich notebook.ipynb -n --pager
-```
-
-**Export profile** — code cells only, no outputs, exported to HTML:
-```
-rich notebook.ipynb --ipynb-cell-types code --ipynb-no-outputs -o notebook.html
-```
+All options that apply to syntax highlighting can be applied to code cells, and all options that apply to Markdown can be
+applied to Markdown cells.
 
 ## JSON
 
