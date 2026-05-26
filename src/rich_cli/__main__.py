@@ -8,8 +8,6 @@ from rich.console import Console, RenderableType
 from rich.markup import escape
 from rich.text import Text
 
-from .csv_renderer import render_csv
-
 console = Console()
 error_console = Console(stderr=True)
 
@@ -261,6 +259,23 @@ class RichCommand(click.Command):
 @click.option("--rst", is_flag=True, help="Display [u]restructured text[/u].")
 @click.option("--csv", is_flag=True, help="Display [u]CSV[/u] as a table.")
 @click.option("--ipynb", is_flag=True, help="Display [u]Jupyter notebook[/u].")
+@click.option(
+    "--ipynb-cell-types",
+    metavar="TYPES",
+    default=None,
+    help="Filter notebook by cell [b]TYPES[/] (comma-separated, e.g. code,markdown).",
+)
+@click.option(
+    "--ipynb-cell-range",
+    metavar="RANGE",
+    default=None,
+    help="Select cell [b]RANGE[/] (1-based, inclusive, e.g. 1-5, 3-, -10).",
+)
+@click.option(
+    "--ipynb-no-outputs",
+    is_flag=True,
+    help="Hide all cell outputs in the notebook.",
+)
 @click.option("--syntax", is_flag=True, help="[u]Syntax[/u] highlighting.")
 @click.option("--inspect", is_flag=True, help="[u]Inspect[/u] a python object.")
 @click.option(
@@ -411,6 +426,9 @@ def main(
     rst: bool = False,
     csv: bool = False,
     ipynb: bool = False,
+    ipynb_cell_types: Optional[str] = None,
+    ipynb_cell_range: Optional[str] = None,
+    ipynb_no_outputs: bool = False,
     inspect: bool = True,
     emoji: bool = False,
     left: bool = False,
@@ -623,6 +641,9 @@ def main(
             line_numbers,
             guides,
             no_wrap,
+            ipynb_cell_types,
+            ipynb_cell_range,
+            ipynb_no_outputs,
         )
 
     else:
@@ -735,6 +756,89 @@ def main(
             on_error("failed to save SVG", error)
 
 
+def render_csv(
+    resource: str,
+    head: Optional[int] = None,
+    tail: Optional[int] = None,
+    title: Optional[str] = None,
+    caption: Optional[str] = None,
+) -> RenderableType:
+    """Render resource as CSV.
+
+    Args:
+        resource (str): Resource string.
+
+    Returns:
+        RenderableType: Table renderable.
+    """
+    import io
+    import csv
+    import re
+    from rich import box
+    from rich.table import Table
+    from operator import itemgetter
+
+    is_number = re.compile(r"\-?[0-9]*?\.?[0-9]*?").fullmatch
+
+    csv_data, _ = read_resource(resource, "csv")
+    sniffer = csv.Sniffer()
+    try:
+        dialect = sniffer.sniff(csv_data[:1024], delimiters=",\t|;")
+        has_header = sniffer.has_header(csv_data[:1024])
+    except csv.Error as error:
+        if resource.lower().endswith(".csv"):
+            dialect = csv.get_dialect("excel")
+            has_header = True
+        elif resource.lower().endswith(".tsv"):
+            dialect = csv.get_dialect("excel-tab")
+            has_header = True
+        else:
+            on_error(str(error))
+
+    csv_file = io.StringIO(csv_data)
+    reader = csv.reader(csv_file, dialect=dialect)
+
+    table = Table(
+        show_header=has_header,
+        box=box.HEAVY_HEAD if has_header else box.SQUARE,
+        border_style="blue",
+        title=title,
+        caption=caption,
+        caption_justify="right",
+    )
+    rows = iter(reader)
+    if has_header:
+        header = next(rows)
+        for column in header:
+            table.add_column(column)
+
+    table_rows = [row for row in rows if row]
+    if head is not None:
+        table_rows = table_rows[:head]
+    elif tail is not None:
+        table_rows = table_rows[-tail:]
+    for row in table_rows:
+        if row:
+            table.add_row(*row)
+
+    for index, table_column in enumerate(table.columns):
+        get_index = itemgetter(index)
+
+        for row in table_rows:
+            try:
+                value = get_index(row)
+                if value and not is_number(value):
+                    break
+            except Exception:
+                break
+        else:
+            table_column.justify = "right"
+            table_column.style = "bold green"
+            table_column.header_style = "bold green"
+
+    return table
+
+
 def render_ipynb(
     resource: str,
     theme: str,
@@ -745,93 +849,58 @@ def render_ipynb(
     line_numbers: bool,
     guides: bool,
     no_wrap: bool,
+    ipynb_cell_types: Optional[str] = None,
+    ipynb_cell_range: Optional[str] = None,
+    ipynb_no_outputs: bool = False,
 ) -> RenderableType:
     """Render resource as Jupyter notebook.
 
-    Args:
-        resource (str): Resource string.
-        theme (str): Syntax theme for code cells.
-        hyperlinks (bool): Whether to render hyperlinks in Markdown cells.
-        lexer (str): Lexer for code cell syntax highlighting (if no language set in notebook).
-        head (int): Display first `head` lines of each cell.
-        tail (int): Display last `tail` lines of each cell.
-        line_numbers (bool): Enable line number in code cells.
-        guides (bool): Enable indentation guides in code cell syntax highlighting.
-        no_wrap (bool): Don't word wrap syntax highlighted cells.
+    The actual work is delegated to :mod:`rich_cli.notebook_renderer`, which
+    implements a four-layer pipeline (parse / filter / transform / render)
+    over a shared ``Notebook`` data model.
 
-    Returns:
-        RenderableType: Notebook as Markdown renderable.
+    All notebook-specific parsing, validation, and filtering happens inside
+    the notebook module. This function is just a thin boundary that catches
+    structured errors and surfaces them through ``on_error``.
     """
-    import json
-    from rich.syntax import Syntax
-    from rich.console import Group
-    from rich.panel import Panel
-    from .markdown import Markdown
 
-    notebook_str, _ = read_resource(resource, None)
-    notebook_dict = json.loads(notebook_str)
-    lexer = lexer or notebook_dict.get("metadata", {}).get("kernelspec", {}).get(
-        "language", ""
+    from .notebook_renderer import (
+        NotebookError,
+        ParseError,
+        CellRangeError,
+        EmptyNotebookError,
+        UnknownCellTypeError,
+        UnknownOutputTypeError,
+        render_ipynb as _render_ipynb,
     )
 
-    renderable: RenderableType
-    new_line = True
-    cells: List[RenderableType] = []
-    for cell in notebook_dict["cells"]:
-        if new_line:
-            cells.append("")
-        if "execution_count" in cell:
-            execution_count = cell["execution_count"] or " "
-            cells.append(f"[green]In [[#66ff00]{execution_count}[/#66ff00]]:[/green]")
-        source = "".join(cell["source"])
-        if cell["cell_type"] == "code":
-            num_lines = len(source.splitlines())
-            line_range = _line_range(head, tail, num_lines)
-            renderable = Panel(
-                Syntax(
-                    source,
-                    lexer,
-                    theme=theme,
-                    line_numbers=line_numbers,
-                    indent_guides=guides,
-                    word_wrap=not no_wrap,
-                    line_range=line_range,
-                ),
-                border_style="dim",
-            )
-        elif cell["cell_type"] == "markdown":
-            renderable = Markdown(source, code_theme=theme, hyperlinks=hyperlinks)
-        else:
-            renderable = Text(source)
-        new_line = True
-        cells.append(renderable)
-        for output in cell.get("outputs", []):
-            output_type = output["output_type"]
-            if output_type == "stream":
-                renderable = Text.from_ansi("".join(output["text"]))
-                new_line = False
-            elif output_type == "error":
-                renderable = Text.from_ansi("\n".join(output["traceback"]).rstrip())
-                new_line = True
-            elif output_type == "execute_result":
-                execution_count = output.get("execution_count", " ") or " "
-                renderable = Text.from_markup(
-                    f"[red]Out[[#ee4b2b]{execution_count}[/#ee4b2b]]:[/red]\n"
-                )
-                data = output["data"].get("text/plain", "")
-                if isinstance(data, list):
-                    renderable += Text.from_ansi("".join(data))
-                else:
-                    renderable += Text.from_ansi(data)
-                new_line = True
-            else:
-                continue
-
-            cells.append(renderable)
-
-    renderable = Group(*cells)
-
-    return renderable
+    try:
+        return _render_ipynb(
+            resource,
+            theme,
+            hyperlinks,
+            lexer=lexer or None,
+            head=head,
+            tail=tail,
+            line_numbers=line_numbers,
+            guides=guides,
+            no_wrap=no_wrap,
+            cell_types=ipynb_cell_types,
+            cell_range=ipynb_cell_range,
+            include_outputs=not ipynb_no_outputs,
+        )
+    except ParseError as exc:
+        on_error(f"invalid notebook: {exc.message}")
+    except CellRangeError as exc:
+        on_error(f"invalid notebook cell range: {exc.message}")
+    except EmptyNotebookError as exc:
+        on_error(f"empty notebook: {exc.message}")
+    except UnknownCellTypeError as exc:
+        on_error(f"notebook format error: {exc.message}")
+    except UnknownOutputTypeError as exc:
+        on_error(f"notebook format error: {exc.message}")
+    except NotebookError as exc:
+        on_error(f"notebook rendering failed: {exc.message}")
 
 
 def _line_range(
