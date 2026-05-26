@@ -8,48 +8,30 @@ from rich.console import Console, RenderableType
 from rich.markup import escape
 from rich.text import Text
 
+from .constants import (
+    AUTO,
+    BOXES,
+    BOX_TEXT,
+    COMMON_LEXERS,
+    CSV,
+    INSPECT,
+    IPYNB,
+    JSON,
+    MARKDOWN,
+    PRINT,
+    RULE,
+    RST,
+    SYNTAX,
+    VERSION,
+)
+from .options import OPTION_GROUPS, OPTION_METADATA
+
 console = Console()
 error_console = Console(stderr=True)
 
 if TYPE_CHECKING:
     from rich.console import ConsoleOptions, RenderResult
     from rich.measure import Measurement
-
-BOXES = [
-    "none",
-    "ascii",
-    "ascii2",
-    "square",
-    "rounded",
-    "heavy",
-    "double",
-]
-
-BOX_TEXT = ", ".join(sorted(BOXES))
-
-COMMON_LEXERS = {
-    "html": "html",
-    "py": "python",
-    "md": "markdown",
-    "js": "javascript",
-    "xml": "xml",
-    "json": "json",
-    "toml": "toml",
-}
-
-VERSION = "1.8.0"
-
-
-AUTO = 0
-SYNTAX = 1
-PRINT = 2
-MARKDOWN = 3
-RST = 4
-JSON = 5
-RULE = 6
-INSPECT = 7
-CSV = 8
-IPYNB = 9
 
 
 def on_error(message: str, error: Optional[Exception] = None, code=-1) -> NoReturn:
@@ -199,9 +181,10 @@ class RichCommand(click.Command):
             "Usage: [b]rich[/b] [b][OPTIONS][/] [b cyan]<PATH,TEXT,URL, or '-'>\n"
         )
 
-        options_table = Table(highlight=True, box=None, show_header=False)
+        params_by_name = {param.name: param for param in self.get_params(ctx)[1:]}
 
-        for param in self.get_params(ctx)[1:]:
+        def render_param(param_name, param):
+            meta = OPTION_METADATA.get(param_name, {})
 
             if len(param.opts) == 2:
                 opt1 = highlighter(param.opts[1])
@@ -213,23 +196,38 @@ class RichCommand(click.Command):
             if param.metavar:
                 opt2 += Text(f" {param.metavar}", style="bold yellow")
 
-            options = Text(" ".join(reversed(param.opts)))
-            help_record = param.get_help_record(ctx)
-            if help_record is None:
-                help = ""
+            if meta and meta.get("description_rich"):
+                help = Text.from_markup(meta["description_rich"], emoji=False)
             else:
-                help = Text.from_markup(param.get_help_record(ctx)[-1], emoji=False)
+                help_record = param.get_help_record(ctx)
+                if help_record is None:
+                    help = ""
+                else:
+                    help = Text.from_markup(help_record[-1], emoji=False)
 
-            if param.metavar:
-                options += f" {param.metavar}"
+            return opt1, opt2, highlighter(help)
 
-            options_table.add_row(opt1, opt2, highlighter(help))
+        for group in OPTION_GROUPS:
+            group_name = group["name"]
+            group_options = group["options"]
 
-        console.print(
-            Panel(
-                options_table, border_style="dim", title="Options", title_align="left"
-            )
-        )
+            options_table = Table(highlight=True, box=None, show_header=False)
+
+            for opt_name in group_options:
+                if opt_name in params_by_name:
+                    param = params_by_name[opt_name]
+                    opt1, opt2, help_text = render_param(opt_name, param)
+                    options_table.add_row(opt1, opt2, help_text)
+
+            if options_table.row_count > 0:
+                console.print(
+                    Panel(
+                        options_table,
+                        border_style="dim",
+                        title=f"[bold]{group_name}[/]",
+                        title_align="left",
+                    )
+                )
 
         from rich.color import Color
 
@@ -474,8 +472,6 @@ def main(
                 on_error(f"padding should be 1, 2 or 4 integers separated by commas")
 
     renderable: RenderableType = ""
-    source_text: Optional[str] = None
-    text_justify = "default"
 
     resource_format = AUTO
     if _print:
@@ -530,26 +526,23 @@ def main(
     if resource_format in (PRINT, RULE):
         from rich.text import Text
 
-        text_justify = "default"
+        justify = "default"
         if text_left:
-            text_justify = "left"
+            justify = "left"
         elif text_right:
-            text_justify = "right"
+            justify = "right"
         elif text_center:
-            text_justify = "center"
+            justify = "center"
         elif text_full:
-            text_justify = "full"
+            justify = "full"
 
         try:
             if resource == "-":
-                raw_text = sys.stdin.read()
                 renderable = Text.from_markup(
-                    raw_text, justify=text_justify, emoji=emoji
+                    sys.stdin.read(), justify=justify, emoji=emoji
                 )
             else:
-                raw_text = resource
-                renderable = Text.from_markup(resource, justify=text_justify, emoji=emoji)
-            source_text = raw_text
+                renderable = Text.from_markup(resource, justify=justify, emoji=emoji)
             renderable.no_wrap = no_wrap
 
         except Exception as error:
@@ -568,14 +561,13 @@ def main(
                 resource,
                 style=render_rule_style,
                 characters=rule_char or "─",
-                align="center" if text_justify in ("full", "default") else text_justify,
+                align="center" if justify in ("full", "default") else justify,
             )
 
     elif resource_format == JSON:
         from rich.json import JSON as RichJSON
 
         json_data, _lexer = read_resource(resource, lexer)
-        source_text = json_data
         try:
             renderable = RichJSON(json_data)
         except Exception as error:
@@ -585,14 +577,12 @@ def main(
         from .markdown import Markdown
 
         markdown_data, lexer = read_resource(resource, lexer)
-        source_text = markdown_data
         renderable = Markdown(markdown_data, code_theme=theme, hyperlinks=hyperlinks)
 
     elif resource_format == RST:
         from rich_rst import RestructuredText
 
         rst_data, _ = read_resource(resource, lexer)
-        source_text = rst_data
         renderable = RestructuredText(
             rst_data,
             code_theme=theme,
@@ -614,13 +604,10 @@ def main(
         )
 
     elif resource_format == CSV:
-        csv_data, _ = read_resource(resource, "csv")
-        source_text = csv_data
+
         renderable = render_csv(resource, head, tail, title, caption)
 
     elif resource_format == IPYNB:
-        notebook_data, _ = read_resource(resource, None)
-        source_text = notebook_data
 
         renderable = render_ipynb(
             resource,
@@ -645,7 +632,6 @@ def main(
             else:
                 code, lexer = read_resource(resource, lexer)
 
-            source_text = code
             num_lines = len(code.splitlines())
             line_range = _line_range(head, tail, num_lines)
             renderable = Syntax(
@@ -696,6 +682,9 @@ def main(
         else:
             renderable = Styled(renderable, text_style)
 
+    if width > 0 and not pager:
+        renderable = ForceWidth(renderable, width=width)
+
     justify = "default"
     if left:
         justify = "left"
@@ -704,69 +693,42 @@ def main(
     elif center:
         justify = "center"
 
-    from .pager import (
-        ContentRenderer,
-        RenderedContent,
-        print_to_terminal,
-        display_in_pager,
-        save_html,
-        save_svg,
-    )
+    if pager:
+        if justify != "default":
+            from rich.align import Align
 
-    if width > 0:
-        render_target_width = width
-    elif max_width > 0:
-        render_target_width = max_width
+            renderable = Align(renderable, justify)
+
+        from .pager import PagerApp, PagerRenderable
+
+        if width < 0:
+            width = console.width
+        render_options = console.options.update(width=width - 1)
+        lines = console.render_lines(renderable, render_options, new_lines=True)
+        PagerApp.run(title=resource, content=PagerRenderable(lines, width=width))
+
     else:
-        render_target_width = console.width
-
-    content_renderer = ContentRenderer(
-        console=console,
-        width=render_target_width,
-        theme=theme,
-        line_numbers=line_numbers,
-        panel_style=panel_style,
-        title=title,
-        caption=caption,
-    )
-
-    if width > 0 and not pager:
-        renderable = ForceWidth(renderable, width=width)
-
-    rendered_content: Optional[RenderedContent] = None
-
-    try:
-        rendered_content = content_renderer.render(
-            renderable,
-            source_text=source_text,
-            justify=justify,
-            for_pager=pager,
-        )
-
-        if pager:
-            display_in_pager(rendered_content, title=resource)
-        else:
-            print_to_terminal(
-                rendered_content,
+        try:
+            console.print(
+                renderable,
+                width=None if max_width <= 0 else max_width,
                 soft_wrap=soft,
                 justify=justify,
             )
+        except Exception as error:
+            on_error("failed to print resource", error)
 
-    except Exception as error:
-        on_error("failed to print resource", error)
+    if export_html:
+        try:
+            console.save_html(export_html, clear=False)
+        except Exception as error:
+            on_error("failed to save HTML", error)
 
-    if rendered_content is not None:
-        if export_html:
-            try:
-                save_html(rendered_content, export_html, clear=False)
-            except Exception as error:
-                on_error("failed to save HTML", error)
-
-        if export_svg:
-            try:
-                save_svg(rendered_content, export_svg, clear=False)
-            except Exception as error:
-                on_error("failed to save SVG", error)
+    if export_svg:
+        try:
+            console.save_svg(export_svg, clear=False)
+        except Exception as error:
+            on_error("failed to save SVG", error)
 
 
 def render_csv(
