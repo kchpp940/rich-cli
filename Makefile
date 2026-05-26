@@ -1,4 +1,4 @@
-.PHONY: help format format-check typecheck typecheck-strict build smoke clean fix check verify deps-check deps-sync
+.PHONY: help format format-check typecheck typecheck-strict build smoke clean fix check verify consistency-check
 
 RED = \033[0;31m
 GREEN = \033[0;32m
@@ -11,20 +11,19 @@ help:
 	@echo "Rich-CLI 开发入口脚本"
 	@echo ""
 	@echo "主要入口:"
-	@echo "  make check   - 日常检查（格式检查 + 依赖一致性 + 构建 + 冒烟）"
-	@echo "  make verify  - 完整验证（格式检查 + 类型检查 + 依赖一致性 + 构建 + 冒烟）"
+	@echo "  make check   - 日常检查（格式检查 + 构建 + 冒烟），不污染仓库"
+	@echo "  make verify  - 完整验证（格式检查 + 类型检查 + 构建 + 冒烟 + 一致性）"
 	@echo "  make fix     - 自动修复（格式化代码）"
 	@echo ""
 	@echo "细分命令:"
-	@echo "  make format          - 格式化代码 (black)，会修改文件"
-	@echo "  make format-check    - 格式检查 (black --check)，不改文件"
-	@echo "  make typecheck       - 类型检查 (mypy)"
-	@echo "  make typecheck-strict- 严格类型检查 (同 typecheck，预留扩展)"
-	@echo "  make build           - 打包构建"
-	@echo "  make smoke           - 冒烟测试"
-	@echo "  make deps-check      - 可选依赖一致性检查"
-	@echo "  make deps-sync       - 同步可选依赖到 README"
-	@echo "  make clean           - 清理临时产物"
+	@echo "  make format            - 格式化代码 (black)，会修改文件"
+	@echo "  make format-check      - 格式检查 (black --check)，不改文件"
+	@echo "  make typecheck         - 类型检查 (mypy)"
+	@echo "  make typecheck-strict  - 严格类型检查 (同 typecheck，预留扩展)"
+	@echo "  make consistency-check - 发布前一致性检查（版本、入口、CLI选项、文档等）"
+	@echo "  make build             - 打包构建"
+	@echo "  make smoke             - 冒烟测试"
+	@echo "  make clean             - 清理临时产物"
 	@echo ""
 
 format:
@@ -44,6 +43,11 @@ typecheck:
 	@printf "$(GREEN)✓ 类型检查 完成$(NC)\n"
 
 typecheck-strict: typecheck
+
+consistency-check:
+	@printf "\n$(YELLOW)========== 一致性检查 ==========$(NC)\n"
+	@python3 scripts/consistency_check.py || (printf "$(RED)✗ 错误发生在: 一致性检查$(NC)\n" && exit 1)
+	@printf "$(GREEN)✓ 一致性检查 完成$(NC)\n"
 
 build:
 	@printf "\n$(YELLOW)========== 打包构建 ==========$(NC)\n"
@@ -67,16 +71,6 @@ smoke:
 	@rm -rf $(TMPDIR)
 	@printf "$(GREEN)✓ 冒烟测试 完成$(NC)\n"
 
-deps-check:
-	@printf "\n$(YELLOW)========== 可选依赖一致性检查 ==========$(NC)\n"
-	@python3 scripts/check_deps_consistency.py || (printf "$(RED)✗ 错误发生在: 可选依赖一致性检查$(NC)\n" && exit 1)
-	@printf "$(GREEN)✓ 可选依赖一致性检查 完成$(NC)\n"
-
-deps-sync:
-	@printf "\n$(YELLOW)========== 同步可选依赖到 README ==========$(NC)\n"
-	@python3 scripts/generate_readme_table.py || (printf "$(RED)✗ 错误发生在: 同步可选依赖到 README$(NC)\n" && exit 1)
-	@printf "$(GREEN)✓ 同步可选依赖到 README 完成$(NC)\n"
-
 clean:
 	@printf "\n$(YELLOW)========== 清理临时产物 ==========$(NC)\n"
 	@rm -rf dist/
@@ -95,14 +89,14 @@ fix: format
 	@echo "$(GREEN)✓ 自动修复完成$(NC)"
 	@echo "$(GREEN)========================================$(NC)"
 
-check: format-check deps-check build smoke
+check: format-check build smoke
 	@rm -rf dist/ build/ *.egg-info src/*.egg-info
 	@echo ""
 	@echo "$(GREEN)========================================$(NC)"
 	@echo "$(GREEN)✓ 所有日常检查通过！$(NC)"
 	@echo "$(GREEN)========================================$(NC)"
 
-verify: format-check typecheck deps-check build smoke
+verify: format-check typecheck consistency-check build smoke
 	@rm -rf dist/ build/ *.egg-info src/*.egg-info
 	@echo ""
 	@echo "$(GREEN)========================================$(NC)"

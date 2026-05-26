@@ -40,30 +40,6 @@ Or using `conda` or `mamba`:
 mamba install -c conda-forge rich-cli
 ```
 
-### Core Features (included by default)
-
-- **Syntax highlighting**: Powered by [Pygments](https://pygments.org/), supporting hundreds of programming languages and file formats.
-- **Rich rendering**: Markdown, JSON, CSV, and more built in.
-
-### Optional Dependencies
-
-Rich-CLI has optional dependencies for additional features. Install them with:
-
-| Feature | Installation Command |
-|---------|---------------------|
-| URL support (http/https) | `pip install rich-cli[http]` |
-| Interactive pager (--pager) | `pip install rich-cli[pager]` |
-| RST rendering (--rst) | `pip install rich-cli[rst]` |
-| All optional features | `pip install rich-cli[full]` |
-
-For pipx users, use the `--pip-args` flag:
-
-```
-pipx install rich-cli --pip-args "rich-cli[full]"
-```
-
-When a feature requiring an optional dependency is used without it being installed, Rich-CLI will provide a clear error message with the installation command.
-
 ## Rich command
 
 Once installed you should have the `rich` command in your path. Run the following to see usage / help:
@@ -82,7 +58,7 @@ rich loop.py
 
 ![syntax1](https://raw.githubusercontent.com/Textualize/rich-cli/main/imgs/syntax1.png)
 
-Add the `--line-number` or `-n` switch to enable line numbers. Add `--guides` or `-g` to enable indentation guides.
+Add the `--line-numbers` or `-n` switch to enable line numbers. Add `--guides` or `-g` to enable indentation guides.
 
 ```
 rich loop.py -n -g
@@ -191,13 +167,25 @@ rich https://raw.githubusercontent.com/Textualize/rich-cli/main/README.md --mark
 
 ## Exporting
 
-In addition to rendering to the console, `rich` can write an HTML file. This works with any command. Add `--export-html` or `-o` followed by the output path.
+In addition to rendering to the console, `rich` can export the output to a file. This works with any command.
+
+### Export HTML
+
+Add `--export-html` or `-o` followed by the output path to write an HTML file.
 
 ```
 rich README.md -o readme.html
 ```
 
 After running this command you should find a "readme.html" in your current working directory.
+
+### Export SVG
+
+Add `--export-svg` followed by the output path to write an SVG file.
+
+```
+rich README.md --export-svg readme.svg
+```
 
 ## Rich Printing
 
@@ -291,6 +279,56 @@ rich "Hello, [b]World[/b]!" -p -a heavy
 ```
 
 ![panel1](https://raw.githubusercontent.com/Textualize/rich-cli/main/imgs/panel1.png)
+
+### Panel Style and Title
+
+You can set a panel border style with `--panel-style` or `-S`, and add a title or caption to the panel with `--title` and `--caption`.
+
+```
+rich "Hello, [b]World[/b]!" -p -a heavy -S "bold red" --title "Greeting" --caption "A friendly message"
+```
+
+Add `--expand` or `-e` to expand the panel to full width.
+
+### Emoji Support
+
+Enable emoji code rendering with `--emoji` or `-j`.
+
+```
+rich "Hello, :wave: World!" -p -j
+```
+
+### Maximum Width
+
+Set a maximum width for the output with `--max-width` or `-W`.
+
+```
+rich "I must not fear. Fear is the mind-killer." -p --max-width 60
+```
+
+### File Preview Modes
+
+Rich can auto-detect file formats, but you can explicitly request a mode with these options:
+
+- `--csv` - Display CSV/TSV files as a table
+- `--rst` - Display reStructuredText files
+- `--syntax` - Force syntax highlighting mode
+- `--inspect` - Inspect a Python object (eval and display its properties)
+
+```
+rich data.csv --csv
+rich document.rst --rst
+rich mymodule.MyClass --inspect
+```
+
+### Head and Tail
+
+Display only the first or last N lines of a file with `--head` or `-h` and `--tail` or `-t`. These work with `--syntax` and `--csv` modes.
+
+```
+rich large_file.py --syntax --head 20
+rich data.csv --csv --tail 10
+```
 
 ## 本地开发
 

@@ -8,8 +8,6 @@ from rich.console import Console, RenderableType
 from rich.markup import escape
 from rich.text import Text
 
-from .optional_dependencies import require_extra, MissingOptionalDependencyError
-
 console = Console()
 error_console = Console(stderr=True)
 
@@ -39,7 +37,7 @@ COMMON_LEXERS = {
     "toml": "toml",
 }
 
-VERSION = "1.8.0"
+VERSION = "1.8.1"
 
 
 AUTO = 0
@@ -69,20 +67,12 @@ def on_error(message: str, error: Optional[Exception] = None, code=-1) -> NoRetu
     sys.exit(code)
 
 
-def _check_extra(extra_name: str) -> None:
-    try:
-        require_extra(extra_name)
-    except MissingOptionalDependencyError as error:
-        on_error(str(error))
-
-
 def read_resource(path: str, lexer: Optional[str]) -> Tuple[str, Optional[str]]:
     """Read a resource form a file or stdin."""
     if not path:
         on_error("missing path or URL")
 
     if path.startswith(("http://", "https://")):
-        _check_extra("http")
         import requests
 
         response = requests.get(path)
@@ -592,7 +582,6 @@ def main(
         renderable = Markdown(markdown_data, code_theme=theme, hyperlinks=hyperlinks)
 
     elif resource_format == RST:
-        _check_extra("rst")
         from rich_rst import RestructuredText
 
         rst_data, _ = read_resource(resource, lexer)
@@ -707,13 +696,12 @@ def main(
         justify = "center"
 
     if pager:
-        _check_extra("pager")
-        from .pager import PagerApp, PagerRenderable
-
         if justify != "default":
             from rich.align import Align
 
             renderable = Align(renderable, justify)
+
+        from .pager import PagerApp, PagerRenderable
 
         if width < 0:
             width = console.width

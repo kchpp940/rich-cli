@@ -1,12 +1,9 @@
+from enum import auto
 from typing import Iterable, List
 
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.measure import Measurement
 from rich.segment import Segment
-
-from .optional_dependencies import require_extra
-
-require_extra("pager")
 
 from textual import events
 from textual.app import App
