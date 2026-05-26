@@ -1,34 +1,15 @@
 from operator import itemgetter
-import os
 import sys
 from typing import TYPE_CHECKING, List, NoReturn, Optional, Tuple
 
 import click
+from pygments.util import ClassNotFound
 from rich.console import Console, RenderableType
+from rich.markup import escape
 from rich.text import Text
-
-from .resource_resolver import ResourceResolver, Resource, ResourceError
 
 console = Console()
 error_console = Console(stderr=True)
-
-
-def on_error(message: str, error: Optional[Exception] = None, code: int = -1) -> NoReturn:
-    if error:
-        error_text = Text(message)
-        error_text.stylize("bold red")
-        error_text += ": "
-        error_text += error_console.highlighter(str(error))
-        error_console.print(error_text)
-    else:
-        error_text = Text(message, style="bold red")
-        error_console.print(error_text)
-    sys.exit(code)
-
-
-def _display_resource_error(resource_error: ResourceError) -> NoReturn:
-    resource_error.display(console)
-    sys.exit(-1)
 
 if TYPE_CHECKING:
     from rich.console import ConsoleOptions, RenderResult
@@ -46,6 +27,16 @@ BOXES = [
 
 BOX_TEXT = ", ".join(sorted(BOXES))
 
+COMMON_LEXERS = {
+    "html": "html",
+    "py": "python",
+    "md": "markdown",
+    "js": "javascript",
+    "xml": "xml",
+    "json": "json",
+    "toml": "toml",
+}
+
 VERSION = "1.8.0"
 
 
@@ -61,7 +52,73 @@ CSV = 8
 IPYNB = 9
 
 
+def on_error(message: str, error: Optional[Exception] = None, code=-1) -> NoReturn:
+    """Render an error message then exit the app."""
 
+    if error:
+        error_text = Text(message)
+        error_text.stylize("bold red")
+        error_text += ": "
+        error_text += error_console.highlighter(str(error))
+        error_console.print(error_text)
+    else:
+        error_text = Text(message, style="bold red")
+        error_console.print(error_text)
+    sys.exit(code)
+
+
+def read_resource(path: str, lexer: Optional[str]) -> Tuple[str, Optional[str]]:
+    """Read a resource form a file or stdin."""
+    if not path:
+        on_error("missing path or URL")
+
+    if path.startswith(("http://", "https://")):
+        import requests
+
+        response = requests.get(path)
+
+        text = response.text
+        try:
+            mime_type: str = response.headers["Content-Type"]
+            if ";" in mime_type:
+                mime_type = mime_type.split(";", 1)[0]
+        except KeyError:
+            pass
+        else:
+            if not lexer:
+                _, dot, ext = path.rpartition(".")
+                if dot and ext:
+                    ext = ext.lower()
+                    lexer = COMMON_LEXERS.get(ext, None)
+                if lexer is None:
+                    from pygments.lexers import get_lexer_for_mimetype
+
+                    try:
+                        lexer = get_lexer_for_mimetype(mime_type).name
+                    except Exception:
+                        pass
+        return (text, lexer)
+    try:
+        if path == "-":
+            return (sys.stdin.read(), None)
+
+        with open(path, "rt", encoding="utf8", errors="replace") as resource_file:
+            text = resource_file.read()
+        if not lexer:
+            _, dot, ext = path.rpartition(".")
+            if dot and ext:
+                ext = ext.lower()
+                lexer = COMMON_LEXERS.get(ext, None)
+        if not lexer:
+            from pygments.lexers import guess_lexer_for_filename
+
+            try:
+                lexer = guess_lexer_for_filename(path, text).name
+            except ClassNotFound:
+                return (text, "text")
+        return (text, lexer)
+    except Exception as error:
+        on_error(f"unable to read {escape(path)}", error)
 
 
 class ForceWidth:
@@ -417,6 +474,8 @@ def main(
                 on_error(f"padding should be 1, 2 or 4 integers separated by commas")
 
     renderable: RenderableType = ""
+    source_text: Optional[str] = None
+    text_justify = "default"
 
     resource_format = AUTO
     if _print:
@@ -438,54 +497,32 @@ def main(
     elif ipynb:
         resource_format = IPYNB
 
-    resolver = ResourceResolver(lexer_hint=lexer or None)
+    if resource_format == AUTO and "." in resource:
+        import os.path
 
-    resolved_resource: Optional[Resource] = None
+        ext = ""
+        if resource.startswith(("http://", "https://")):
+            from urllib.parse import urlparse
 
-    def get_resource() -> Resource:
-        nonlocal resolved_resource
-        if resolved_resource is None:
             try:
-                resolved_resource = resolver.resolve(resource)
-            except ResourceError as re:
-                _display_resource_error(re)
-        return resolved_resource
+                path = urlparse(resource).path
+            except Exception:
+                pass
+            else:
+                ext = os.path.splitext(path)[-1].lower()
+        else:
+            ext = os.path.splitext(resource)[-1].lower()
 
-    if resource_format == AUTO and resource:
-        if resource == "-" or resource.startswith(("http://", "https://")) or os.path.exists(resource):
-            res = get_resource()
-            recommended = res.recommended_format
-            if recommended == "markdown":
-                resource_format = MARKDOWN
-            elif recommended == "json":
-                resource_format = JSON
-            elif recommended == "csv":
-                resource_format = CSV
-            elif recommended == "rst":
-                resource_format = RST
-            elif recommended == "ipynb":
-                resource_format = IPYNB
-        elif "." in resource:
-            temp_resolver = ResourceResolver()
-            temp_resource = Resource(
-                content="",
-                source=resource,
-                source_path=resource if not resource.startswith(("http://", "https://")) else temp_resolver._extract_url_path(resource),
-                recommended_lexer=None,
-                resource_type="unknown",
-            )
-            temp_resource.format_recommendation = temp_resolver.compute_format_recommendation(temp_resource)
-            recommended = temp_resource.recommended_format
-            if recommended == "markdown":
-                resource_format = MARKDOWN
-            elif recommended == "json":
-                resource_format = JSON
-            elif recommended == "csv":
-                resource_format = CSV
-            elif recommended == "rst":
-                resource_format = RST
-            elif recommended == "ipynb":
-                resource_format = IPYNB
+        if ext == ".md":
+            resource_format = MARKDOWN
+        elif ext == ".json":
+            resource_format = JSON
+        elif ext in (".csv", ".tsv"):
+            resource_format = CSV
+        elif ext == ".rst":
+            resource_format = RST
+        elif ext == ".ipynb":
+            resource_format = IPYNB
 
     if resource_format == AUTO:
         resource_format = SYNTAX
@@ -493,23 +530,26 @@ def main(
     if resource_format in (PRINT, RULE):
         from rich.text import Text
 
-        justify = "default"
+        text_justify = "default"
         if text_left:
-            justify = "left"
+            text_justify = "left"
         elif text_right:
-            justify = "right"
+            text_justify = "right"
         elif text_center:
-            justify = "center"
+            text_justify = "center"
         elif text_full:
-            justify = "full"
+            text_justify = "full"
 
         try:
             if resource == "-":
+                raw_text = sys.stdin.read()
                 renderable = Text.from_markup(
-                    sys.stdin.read(), justify=justify, emoji=emoji
+                    raw_text, justify=text_justify, emoji=emoji
                 )
             else:
-                renderable = Text.from_markup(resource, justify=justify, emoji=emoji)
+                raw_text = resource
+                renderable = Text.from_markup(resource, justify=text_justify, emoji=emoji)
+            source_text = raw_text
             renderable.no_wrap = no_wrap
 
         except Exception as error:
@@ -528,32 +568,35 @@ def main(
                 resource,
                 style=render_rule_style,
                 characters=rule_char or "─",
-                align="center" if justify in ("full", "default") else justify,
+                align="center" if text_justify in ("full", "default") else text_justify,
             )
 
     elif resource_format == JSON:
         from rich.json import JSON as RichJSON
 
-        res = get_resource()
+        json_data, _lexer = read_resource(resource, lexer)
+        source_text = json_data
         try:
-            renderable = RichJSON(res.content)
+            renderable = RichJSON(json_data)
         except Exception as error:
             on_error("unable to read json", error)
 
     elif resource_format == MARKDOWN:
         from .markdown import Markdown
 
-        res = get_resource()
-        renderable = Markdown(res.content, code_theme=theme, hyperlinks=hyperlinks)
+        markdown_data, lexer = read_resource(resource, lexer)
+        source_text = markdown_data
+        renderable = Markdown(markdown_data, code_theme=theme, hyperlinks=hyperlinks)
 
     elif resource_format == RST:
         from rich_rst import RestructuredText
 
-        res = get_resource()
+        rst_data, _ = read_resource(resource, lexer)
+        source_text = rst_data
         renderable = RestructuredText(
-            res.content,
+            rst_data,
             code_theme=theme,
-            default_lexer=res.recommended_lexer or "python",
+            default_lexer=lexer or "python",
             show_errors=False,
         )
 
@@ -571,15 +614,19 @@ def main(
         )
 
     elif resource_format == CSV:
-        res = get_resource()
-        renderable = render_csv(res, head, tail, title, caption)
+        csv_data, _ = read_resource(resource, "csv")
+        source_text = csv_data
+        renderable = render_csv(resource, head, tail, title, caption)
 
     elif resource_format == IPYNB:
-        res = get_resource()
+        notebook_data, _ = read_resource(resource, None)
+        source_text = notebook_data
+
         renderable = render_ipynb(
-            res,
+            resource,
             theme,
             hyperlinks,
+            lexer,
             head,
             tail,
             line_numbers,
@@ -593,15 +640,17 @@ def main(
         from rich.syntax import Syntax
 
         try:
-            res = get_resource()
-            code = res.content
-            lexer_name = res.recommended_lexer or "text"
+            if resource == "-":
+                code = sys.stdin.read()
+            else:
+                code, lexer = read_resource(resource, lexer)
 
+            source_text = code
             num_lines = len(code.splitlines())
             line_range = _line_range(head, tail, num_lines)
             renderable = Syntax(
                 code,
-                lexer_name,
+                lexer,
                 theme=theme,
                 line_numbers=line_numbers,
                 indent_guides=guides,
@@ -647,9 +696,6 @@ def main(
         else:
             renderable = Styled(renderable, text_style)
 
-    if width > 0 and not pager:
-        renderable = ForceWidth(renderable, width=width)
-
     justify = "default"
     if left:
         justify = "left"
@@ -658,47 +704,73 @@ def main(
     elif center:
         justify = "center"
 
-    if pager:
-        if justify != "default":
-            from rich.align import Align
+    from .pager import (
+        ContentRenderer,
+        RenderedContent,
+        print_to_terminal,
+        display_in_pager,
+        save_html,
+        save_svg,
+    )
 
-            renderable = Align(renderable, justify)
-
-        from .pager import PagerApp, PagerRenderable
-
-        if width < 0:
-            width = console.width
-        render_options = console.options.update(width=width - 1)
-        lines = console.render_lines(renderable, render_options, new_lines=True)
-        pager_title = resolved_resource.source if resolved_resource else resource
-        PagerApp.run(title=pager_title, content=PagerRenderable(lines, width=width))
-
+    if width > 0:
+        render_target_width = width
+    elif max_width > 0:
+        render_target_width = max_width
     else:
-        try:
-            console.print(
-                renderable,
-                width=None if max_width <= 0 else max_width,
+        render_target_width = console.width
+
+    content_renderer = ContentRenderer(
+        console=console,
+        width=render_target_width,
+        theme=theme,
+        line_numbers=line_numbers,
+        panel_style=panel_style,
+        title=title,
+        caption=caption,
+    )
+
+    if width > 0 and not pager:
+        renderable = ForceWidth(renderable, width=width)
+
+    rendered_content: Optional[RenderedContent] = None
+
+    try:
+        rendered_content = content_renderer.render(
+            renderable,
+            source_text=source_text,
+            justify=justify,
+            for_pager=pager,
+        )
+
+        if pager:
+            display_in_pager(rendered_content, title=resource)
+        else:
+            print_to_terminal(
+                rendered_content,
                 soft_wrap=soft,
                 justify=justify,
             )
-        except Exception as error:
-            on_error("failed to print resource", error)
 
-    if export_html:
-        try:
-            console.save_html(export_html, clear=False)
-        except Exception as error:
-            on_error("failed to save HTML", error)
+    except Exception as error:
+        on_error("failed to print resource", error)
 
-    if export_svg:
-        try:
-            console.save_svg(export_svg, clear=False)
-        except Exception as error:
-            on_error("failed to save SVG", error)
+    if rendered_content is not None:
+        if export_html:
+            try:
+                save_html(rendered_content, export_html, clear=False)
+            except Exception as error:
+                on_error("failed to save HTML", error)
+
+        if export_svg:
+            try:
+                save_svg(rendered_content, export_svg, clear=False)
+            except Exception as error:
+                on_error("failed to save SVG", error)
 
 
 def render_csv(
-    resource: Resource,
+    resource: str,
     head: Optional[int] = None,
     tail: Optional[int] = None,
     title: Optional[str] = None,
@@ -707,7 +779,7 @@ def render_csv(
     """Render resource as CSV.
 
     Args:
-        resource (Resource): Resource object.
+        resource (str): Resource string.
 
     Returns:
         RenderableType: Table renderable.
@@ -721,17 +793,16 @@ def render_csv(
 
     is_number = re.compile(r"\-?[0-9]*?\.?[0-9]*?").fullmatch
 
-    csv_data = resource.content
+    csv_data, _ = read_resource(resource, "csv")
     sniffer = csv.Sniffer()
     try:
         dialect = sniffer.sniff(csv_data[:1024], delimiters=",\t|;")
         has_header = sniffer.has_header(csv_data[:1024])
     except csv.Error as error:
-        ext = resource.extension
-        if ext == ".csv":
+        if resource.lower().endswith(".csv"):
             dialect = csv.get_dialect("excel")
             has_header = True
-        elif ext == ".tsv":
+        elif resource.lower().endswith(".tsv"):
             dialect = csv.get_dialect("excel-tab")
             has_header = True
         else:
@@ -782,9 +853,10 @@ def render_csv(
 
 
 def render_ipynb(
-    resource: Resource,
+    resource: str,
     theme: str,
     hyperlinks: bool,
+    lexer: str,
     head: Optional[int],
     tail: Optional[int],
     line_numbers: bool,
@@ -794,9 +866,10 @@ def render_ipynb(
     """Render resource as Jupyter notebook.
 
     Args:
-        resource (Resource): Resource object.
+        resource (str): Resource string.
         theme (str): Syntax theme for code cells.
         hyperlinks (bool): Whether to render hyperlinks in Markdown cells.
+        lexer (str): Lexer for code cell syntax highlighting (if no language set in notebook).
         head (int): Display first `head` lines of each cell.
         tail (int): Display last `tail` lines of each cell.
         line_numbers (bool): Enable line number in code cells.
@@ -812,9 +885,9 @@ def render_ipynb(
     from rich.panel import Panel
     from .markdown import Markdown
 
-    notebook_str = resource.content
+    notebook_str, _ = read_resource(resource, None)
     notebook_dict = json.loads(notebook_str)
-    lexer = resource.recommended_lexer or notebook_dict.get("metadata", {}).get("kernelspec", {}).get(
+    lexer = lexer or notebook_dict.get("metadata", {}).get("kernelspec", {}).get(
         "language", ""
     )
 
