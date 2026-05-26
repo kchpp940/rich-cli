@@ -175,42 +175,6 @@ rich README.md -o readme.html
 
 After running this command you should find a "readme.html" in your current working directory.
 
-You can also export to SVG with `--export-svg`.
-
-```
-rich README.md --export-svg readme.svg
-```
-
-### Unified export metadata
-
-Terminal rendering and export rendering (HTML, SVG) share the same set of
-export options, so the same metadata appears in the terminal, in the HTML
-output, and as the tab title / content header of the SVG. The options are:
-
-- `--export-meta` — enable the metadata header block.
-- `--title TEXT` — used as the export title (also the panel title).
-- `--theme THEME` — syntax theme reported in metadata (also applied to
-  syntax-highlighted / markdown resources).
-- `--export-source PATH` — override the source path shown in metadata
-  (defaults to the resource argument).
-- `--no-export-time` — omit the generated-time field.
-- `--export-inline-styles` — (HTML only) inline every style on its element
-  instead of emitting a shared stylesheet.
-
-Example — export a README with a title, source path and timestamp visible both
-in the terminal and in the generated HTML/SVG:
-
-```
-rich README.md \
-    --export-meta \
-    --title "README" \
-    --theme ansi_dark \
-    --export-source "https://example.com/README.md" \
-    --export-html readme.html \
-    --export-svg readme.svg \
-    --export-inline-styles
-```
-
 ## Rich Printing
 
 If you add the `--print` or `--p` option then Rich will treat the first argument as [console markup](https://rich.readthedocs.io/en/latest/markup.html) which allows you to insert styles with a markup similar in design to bbcode.

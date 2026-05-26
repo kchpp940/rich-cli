@@ -1,5 +1,6 @@
 from operator import itemgetter
 import sys
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List, NoReturn, Optional, Tuple
 
 import click
@@ -395,36 +396,6 @@ class RichCommand(click.Command):
 @click.option(
     "--export-svg", metavar="PATH", default="", help="Write SVG to [b]PATH[/b]."
 )
-@click.option(
-    "--export-meta",
-    is_flag=True,
-    help=(
-        "Emit export metadata (title, theme, source path, generated time) "
-        "as a header block in terminal rendering and in HTML/SVG export."
-    ),
-)
-@click.option(
-    "--export-source",
-    metavar="PATH",
-    default="",
-    help=(
-        "Override the source path shown in export metadata "
-        "(defaults to the resource argument)."
-    ),
-)
-@click.option(
-    "--no-export-time",
-    is_flag=True,
-    help="Omit the generated-time field from export metadata.",
-)
-@click.option(
-    "--export-inline-styles",
-    is_flag=True,
-    help=(
-        "Inline styles on every element when exporting HTML. "
-        "Produces larger but self-contained markup."
-    ),
-)
 @click.option("--pager", is_flag=True, help="Display in an interactive pager.")
 @click.option("--version", "-v", is_flag=True, help="Print version and exit.")
 def main(
@@ -470,10 +441,6 @@ def main(
     force_terminal: bool = False,
     export_html: str = "",
     export_svg: str = "",
-    export_meta: bool = False,
-    export_source: str = "",
-    no_export_time: bool = False,
-    export_inline_styles: bool = False,
     pager: bool = False,
 ):
     """Rich toolbox for console output."""
@@ -559,129 +526,37 @@ def main(
     if resource_format == AUTO:
         resource_format = SYNTAX
 
-    if resource_format in (PRINT, RULE):
-        from rich.text import Text
+    justify = "default"
+    if text_left:
+        justify = "left"
+    elif text_right:
+        justify = "right"
+    elif text_center:
+        justify = "center"
+    elif text_full:
+        justify = "full"
 
-        justify = "default"
-        if text_left:
-            justify = "left"
-        elif text_right:
-            justify = "right"
-        elif text_center:
-            justify = "center"
-        elif text_full:
-            justify = "full"
+    prepared_content = prepare_content(
+        resource=resource,
+        resource_format=resource_format,
+        lexer=lexer,
+        theme=theme,
+        line_numbers=line_numbers,
+        guides=guides,
+        no_wrap=no_wrap,
+        emoji=emoji,
+        hyperlinks=hyperlinks,
+        head=head,
+        tail=tail,
+        title=title,
+        caption=caption,
+        rule=rule,
+        rule_char=rule_char,
+        rule_style=rule_style,
+        justify=justify,
+    )
 
-        try:
-            if resource == "-":
-                renderable = Text.from_markup(
-                    sys.stdin.read(), justify=justify, emoji=emoji
-                )
-            else:
-                renderable = Text.from_markup(resource, justify=justify, emoji=emoji)
-            renderable.no_wrap = no_wrap
-
-        except Exception as error:
-            on_error(f"unable to parse console markup", error)
-
-        if rule:
-            from rich.rule import Rule
-            from rich.style import Style
-
-            try:
-                render_rule_style = Style.parse(rule_style)
-            except Exception as error:
-                on_error("unable to parse rule style", error)
-
-            renderable = Rule(
-                resource,
-                style=render_rule_style,
-                characters=rule_char or "─",
-                align="center" if justify in ("full", "default") else justify,
-            )
-
-    elif resource_format == JSON:
-        from rich.json import JSON as RichJSON
-
-        json_data, _lexer = read_resource(resource, lexer)
-        try:
-            renderable = RichJSON(json_data)
-        except Exception as error:
-            on_error("unable to read json", error)
-
-    elif resource_format == MARKDOWN:
-        from .markdown import Markdown
-
-        markdown_data, lexer = read_resource(resource, lexer)
-        renderable = Markdown(markdown_data, code_theme=theme, hyperlinks=hyperlinks)
-
-    elif resource_format == RST:
-        from rich_rst import RestructuredText
-
-        rst_data, _ = read_resource(resource, lexer)
-        renderable = RestructuredText(
-            rst_data,
-            code_theme=theme,
-            default_lexer=lexer or "python",
-            show_errors=False,
-        )
-
-    elif resource_format == INSPECT:
-        try:
-            inspect_data = eval(resource)
-        except Exception:
-            console.print_exception()
-            on_error(f"unable to eval {resource!r}")
-
-        from rich._inspect import Inspect
-
-        renderable = Inspect(
-            inspect_data, help=False, dunder=False, all=False, methods=True
-        )
-
-    elif resource_format == CSV:
-
-        renderable = render_csv(resource, head, tail, title, caption)
-
-    elif resource_format == IPYNB:
-
-        renderable = render_ipynb(
-            resource,
-            theme,
-            hyperlinks,
-            lexer,
-            head,
-            tail,
-            line_numbers,
-            guides,
-            no_wrap,
-        )
-
-    else:
-        if not resource:
-            print_usage()
-        from rich.syntax import Syntax
-
-        try:
-            if resource == "-":
-                code = sys.stdin.read()
-            else:
-                code, lexer = read_resource(resource, lexer)
-
-            num_lines = len(code.splitlines())
-            line_range = _line_range(head, tail, num_lines)
-            renderable = Syntax(
-                code,
-                lexer,
-                theme=theme,
-                line_numbers=line_numbers,
-                indent_guides=guides,
-                word_wrap=not no_wrap,
-                line_range=line_range,
-            )
-
-        except Exception as error:
-            on_error("unable to read file", error)
+    renderable = prepared_content.renderable
 
     if print_padding:
         from rich.padding import Padding
@@ -721,51 +596,34 @@ def main(
     if width > 0 and not pager:
         renderable = ForceWidth(renderable, width=width)
 
-    from .export import (
-        ExportMetadata,
-        build_export_options,
-        build_export_targets,
-        save_exports,
-    )
-
-    export_options = build_export_options(
-        export_meta=export_meta,
-        title=title,
-        theme=theme,
-        resource=resource,
-        export_source=export_source,
-        no_export_time=no_export_time,
-        export_inline_styles=export_inline_styles,
-    )
-    if export_meta and export_options.has_metadata():
-        renderable = ExportMetadata(renderable, export_options)
-
-    export_targets = build_export_targets(
-        export_html=export_html,
-        export_svg=export_svg,
-    )
-
-    justify = "default"
+    align_justify = "default"
     if left:
-        justify = "left"
+        align_justify = "left"
     elif right:
-        justify = "right"
+        align_justify = "right"
     elif center:
-        justify = "center"
+        align_justify = "center"
 
     if pager:
-        if justify != "default":
+        if align_justify != "default":
             from rich.align import Align
 
-            renderable = Align(renderable, justify)
+            renderable = Align(renderable, align_justify)
 
-        from .pager import PagerApp, PagerRenderable
+        # Update the renderable in prepared_content to include all wrappers
+        prepared_content.renderable = renderable
+
+        from .pager import PagerApp
 
         if width < 0:
             width = console.width
-        render_options = console.options.update(width=width - 1)
-        lines = console.render_lines(renderable, render_options, new_lines=True)
-        PagerApp.run(title=resource, content=PagerRenderable(lines, width=width))
+
+        PagerApp.run(
+            title=resource,
+            content=prepared_content,
+            console=console,
+            width=width,
+        )
 
     else:
         try:
@@ -773,16 +631,22 @@ def main(
                 renderable,
                 width=None if max_width <= 0 else max_width,
                 soft_wrap=soft,
-                justify=justify,
+                justify=align_justify,
             )
         except Exception as error:
             on_error("failed to print resource", error)
 
-    save_exports(
-        console,
-        export_options,
-        export_targets,
-    )
+    if export_html:
+        try:
+            console.save_html(export_html, clear=False)
+        except Exception as error:
+            on_error("failed to save HTML", error)
+
+    if export_svg:
+        try:
+            console.save_svg(export_svg, clear=False)
+        except Exception as error:
+            on_error("failed to save SVG", error)
 
 
 def render_csv(
@@ -981,6 +845,196 @@ def _line_range(
     else:
         line_range = None
     return line_range
+
+
+@dataclass
+class PreparedContent:
+    """Well-defined data object for prepared content.
+
+    This is the single source of truth for content that flows between
+    prepare_content and the pager. No dynamic attribute guessing.
+
+    Attributes:
+        renderable: Rich renderable object for display
+        content_type: Content type (SYNTAX, MARKDOWN, JSON, etc.)
+        raw_text: Original raw text of the content
+        source_lines: Original text split into lines (for source line mapping)
+        lexer: Detected lexer name, if any
+        theme: Syntax/theme name used
+        line_numbers: Whether line numbers were enabled (display option only)
+        guides: Whether indent guides were enabled
+    """
+    renderable: RenderableType
+    content_type: int
+    raw_text: str = ""
+    source_lines: List[str] = field(default_factory=list)
+    lexer: Optional[str] = None
+    theme: str = ""
+    line_numbers: bool = False
+    guides: bool = False
+
+
+def prepare_content(
+    resource: str,
+    resource_format: int,
+    lexer: str,
+    theme: str,
+    line_numbers: bool,
+    guides: bool,
+    no_wrap: bool,
+    emoji: bool,
+    hyperlinks: bool,
+    head: Optional[int],
+    tail: Optional[int],
+    title: str,
+    caption: str,
+    rule: bool = False,
+    rule_char: Optional[str] = None,
+    rule_style: str = "",
+    justify: str = "default",
+) -> PreparedContent:
+    """Prepare content for rendering, used by both direct output and pager.
+
+    Returns:
+        PreparedContent: Well-defined data object with renderable and metadata.
+    """
+    renderable: RenderableType = ""
+    raw_text = ""
+    detected_lexer: Optional[str] = None
+
+    if resource_format in (PRINT, RULE):
+        from rich.text import Text
+
+        justify = "default"
+
+        try:
+            if resource == "-":
+                raw_text = sys.stdin.read()
+                renderable = Text.from_markup(raw_text, justify=justify, emoji=emoji)
+            else:
+                raw_text = resource
+                renderable = Text.from_markup(resource, justify=justify, emoji=emoji)
+            renderable.no_wrap = no_wrap
+
+        except Exception as error:
+            on_error(f"unable to parse console markup", error)
+
+        if rule:
+            from rich.rule import Rule
+            from rich.style import Style
+
+            try:
+                render_rule_style = Style.parse(rule_style)
+            except Exception as error:
+                on_error("unable to parse rule style", error)
+
+            renderable = Rule(
+                resource,
+                style=render_rule_style,
+                characters=rule_char or "─",
+                align="center" if justify in ("full", "default") else justify,
+            )
+
+    elif resource_format == JSON:
+        from rich.json import JSON as RichJSON
+
+        json_data, _lexer = read_resource(resource, lexer)
+        raw_text = json_data
+        try:
+            renderable = RichJSON(json_data)
+        except Exception as error:
+            on_error("unable to read json", error)
+
+    elif resource_format == MARKDOWN:
+        from .markdown import Markdown
+
+        markdown_data, detected_lexer = read_resource(resource, lexer)
+        raw_text = markdown_data
+        renderable = Markdown(markdown_data, code_theme=theme, hyperlinks=hyperlinks)
+
+    elif resource_format == RST:
+        from rich_rst import RestructuredText
+
+        rst_data, _ = read_resource(resource, lexer)
+        raw_text = rst_data
+        renderable = RestructuredText(
+            rst_data,
+            code_theme=theme,
+            default_lexer=lexer or "python",
+            show_errors=False,
+        )
+
+    elif resource_format == INSPECT:
+        try:
+            inspect_data = eval(resource)
+        except Exception:
+            console.print_exception()
+            on_error(f"unable to eval {resource!r}")
+
+        from rich._inspect import Inspect
+
+        renderable = Inspect(
+            inspect_data, help=False, dunder=False, all=False, methods=True
+        )
+
+    elif resource_format == CSV:
+        renderable = render_csv(resource, head, tail, title, caption)
+        raw_data, _ = read_resource(resource, "csv")
+        raw_text = raw_data
+
+    elif resource_format == IPYNB:
+        renderable = render_ipynb(
+            resource,
+            theme,
+            hyperlinks,
+            lexer,
+            head,
+            tail,
+            line_numbers,
+            guides,
+            no_wrap,
+        )
+        raw_data, _ = read_resource(resource, None)
+        raw_text = raw_data
+
+    else:
+        if not resource:
+            print_usage()
+        from rich.syntax import Syntax
+
+        try:
+            if resource == "-":
+                code = sys.stdin.read()
+                detected_lexer = None
+            else:
+                code, detected_lexer = read_resource(resource, lexer)
+
+            raw_text = code
+            num_lines = len(code.splitlines())
+            line_range = _line_range(head, tail, num_lines)
+            renderable = Syntax(
+                code,
+                detected_lexer or "text",
+                theme=theme,
+                line_numbers=line_numbers,
+                indent_guides=guides,
+                word_wrap=not no_wrap,
+                line_range=line_range,
+            )
+
+        except Exception as error:
+            on_error("unable to read file", error)
+
+    return PreparedContent(
+        renderable=renderable,
+        content_type=resource_format,
+        raw_text=raw_text,
+        source_lines=raw_text.splitlines() if raw_text else [],
+        lexer=detected_lexer,
+        theme=theme,
+        line_numbers=line_numbers,
+        guides=guides,
+    )
 
 
 def run():
