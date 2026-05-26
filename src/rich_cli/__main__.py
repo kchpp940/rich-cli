@@ -8,30 +8,48 @@ from rich.console import Console, RenderableType
 from rich.markup import escape
 from rich.text import Text
 
-from .constants import (
-    AUTO,
-    BOXES,
-    BOX_TEXT,
-    COMMON_LEXERS,
-    CSV,
-    INSPECT,
-    IPYNB,
-    JSON,
-    MARKDOWN,
-    PRINT,
-    RULE,
-    RST,
-    SYNTAX,
-    VERSION,
-)
-from .options import OPTION_GROUPS, OPTION_METADATA
-
 console = Console()
 error_console = Console(stderr=True)
 
 if TYPE_CHECKING:
     from rich.console import ConsoleOptions, RenderResult
     from rich.measure import Measurement
+
+BOXES = [
+    "none",
+    "ascii",
+    "ascii2",
+    "square",
+    "rounded",
+    "heavy",
+    "double",
+]
+
+BOX_TEXT = ", ".join(sorted(BOXES))
+
+COMMON_LEXERS = {
+    "html": "html",
+    "py": "python",
+    "md": "markdown",
+    "js": "javascript",
+    "xml": "xml",
+    "json": "json",
+    "toml": "toml",
+}
+
+VERSION = "1.8.0"
+
+
+AUTO = 0
+SYNTAX = 1
+PRINT = 2
+MARKDOWN = 3
+RST = 4
+JSON = 5
+RULE = 6
+INSPECT = 7
+CSV = 8
+IPYNB = 9
 
 
 def on_error(message: str, error: Optional[Exception] = None, code=-1) -> NoReturn:
@@ -181,10 +199,9 @@ class RichCommand(click.Command):
             "Usage: [b]rich[/b] [b][OPTIONS][/] [b cyan]<PATH,TEXT,URL, or '-'>\n"
         )
 
-        params_by_name = {param.name: param for param in self.get_params(ctx)[1:]}
+        options_table = Table(highlight=True, box=None, show_header=False)
 
-        def render_param(param_name, param):
-            meta = OPTION_METADATA.get(param_name, {})
+        for param in self.get_params(ctx)[1:]:
 
             if len(param.opts) == 2:
                 opt1 = highlighter(param.opts[1])
@@ -196,38 +213,23 @@ class RichCommand(click.Command):
             if param.metavar:
                 opt2 += Text(f" {param.metavar}", style="bold yellow")
 
-            if meta and meta.get("description_rich"):
-                help = Text.from_markup(meta["description_rich"], emoji=False)
+            options = Text(" ".join(reversed(param.opts)))
+            help_record = param.get_help_record(ctx)
+            if help_record is None:
+                help = ""
             else:
-                help_record = param.get_help_record(ctx)
-                if help_record is None:
-                    help = ""
-                else:
-                    help = Text.from_markup(help_record[-1], emoji=False)
+                help = Text.from_markup(param.get_help_record(ctx)[-1], emoji=False)
 
-            return opt1, opt2, highlighter(help)
+            if param.metavar:
+                options += f" {param.metavar}"
 
-        for group in OPTION_GROUPS:
-            group_name = group["name"]
-            group_options = group["options"]
+            options_table.add_row(opt1, opt2, highlighter(help))
 
-            options_table = Table(highlight=True, box=None, show_header=False)
-
-            for opt_name in group_options:
-                if opt_name in params_by_name:
-                    param = params_by_name[opt_name]
-                    opt1, opt2, help_text = render_param(opt_name, param)
-                    options_table.add_row(opt1, opt2, help_text)
-
-            if options_table.row_count > 0:
-                console.print(
-                    Panel(
-                        options_table,
-                        border_style="dim",
-                        title=f"[bold]{group_name}[/]",
-                        title_align="left",
-                    )
-                )
+        console.print(
+            Panel(
+                options_table, border_style="dim", title="Options", title_align="left"
+            )
+        )
 
         from rich.color import Color
 

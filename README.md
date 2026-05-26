@@ -199,117 +199,9 @@ Note that when rich isn't writing directly to the terminal it will disable ansi 
 cat README.md | rich - --markdown --force-terminal
 ```
 
-<!-- BEGIN OPTIONS -->
+## General Options
 
-## 命令行选项参考
-
-Rich CLI 的命令行选项按以下类别组织，方便快速查找：
-
-### 输入来源
-
-控制输入数据的来源和解析方式。
-
-| 选项 | 短选项 | 说明 |
-|------|--------|------|
-| `<PATH or TEXT or '-'>` | - | 输入文件路径、文本、URL 或 '-'（从标准输入读取） |
-| `--lexer` `LEXER` | `-x` | 指定语法高亮的词法分析器。参见 [Pygments lexers](https://pygments.org/docs/lexers/) |
-| `--force-terminal` | - | 即使输出不是终端，也强制使用终端格式输出 |
-
-### 渲染格式
-
-指定内容的渲染格式。
-
-| 选项 | 短选项 | 说明 |
-|------|--------|------|
-| `--print` | `-p` | 解析并渲染 [控制台标记](https://rich.readthedocs.io/en/latest/markup.html) |
-| `--syntax` | - | 启用语法高亮 |
-| `--json` | `-J` | 以 JSON 格式显示 |
-| `--markdown` | `-m` | 以 Markdown 格式显示 |
-| `--rst` | - | 以 reStructuredText 格式显示 |
-| `--rule` | `-u` | 显示水平分隔线 |
-| `--inspect` | - | 检查 Python 对象 |
-
-### 显示样式
-
-控制输出的外观和布局。
-
-| 选项 | 短选项 | 说明 |
-|------|--------|------|
-| `--emoji` | `-j` | 启用表情符号代码，例如 `:sparkle:` |
-| `--left` | `-l` | 整体内容左对齐 |
-| `--right` | `-r` | 整体内容右对齐 |
-| `--center` | `-c` | 整体内容居中 |
-| `--text-left` | `-L` | 文本内容左对齐 |
-| `--text-right` | `-R` | 文本内容右对齐 |
-| `--text-center` | `-C` | 文本内容居中 |
-| `--text-full` | `-F` | 文本内容两端对齐 |
-| `--soft` | - | 启用软换行（需要 `--print`） |
-| `--expand` | `-e` | 展开到全宽（需要 `--panel`） |
-| `--width` `SIZE` | `-w` | 设置输出宽度为 SIZE 字符 |
-| `--max-width` `SIZE` | `-W` | 设置最大宽度为 SIZE 字符 |
-| `--style` `STYLE` | `-s` | 设置文本样式，参见 [Rich 样式语法](https://rich.readthedocs.io/en/latest/style.html) |
-| `--rule-style` `STYLE` | - | 设置分隔线样式 |
-| `--rule-char` `CHARACTER` | - | 设置分隔线使用的字符 |
-| `--padding` `TOP,RIGHT,BOTTOM,LEFT` | `-d` | 设置输出内边距，1、2 或 4 个逗号分隔的整数，例如 `2,4` |
-| `--panel` `BOX` | `-a` | 设置面板边框样式：`ascii`, `ascii2`, `double`, `heavy`, `none`, `rounded`, `square` |
-| `--panel-style` `STYLE` | `-S` | 设置面板样式（需要 `--panel`） |
-| `--title` `TEXT` | - | 设置面板标题 |
-| `--caption` `TEXT` | - | 设置面板说明文字 |
-| `--theme` `THEME` | - | 设置语法高亮主题，参见 [Pygments 主题](https://pygments.org/styles/)。也可通过环境变量 `RICH_THEME` 设置 |
-| `--line-numbers` | `-n` | 显示行号 |
-| `--guides` | `-g` | 显示缩进参考线 |
-| `--hyperlinks` | `-y` | 在 Markdown 中渲染超链接 |
-| `--no-wrap` | - | 禁用语法高亮文件的自动换行 |
-
-### Notebook
-
-Jupyter notebook 相关选项。
-
-| 选项 | 短选项 | 说明 |
-|------|--------|------|
-| `--ipynb` | - | 以 Jupyter notebook 格式显示。如果文件以 `.ipynb` 结尾会自动检测。支持所有语法高亮和 Markdown 相关选项 |
-
-### CSV
-
-CSV/TSV 表格相关选项。
-
-| 选项 | 短选项 | 说明 |
-|------|--------|------|
-| `--csv` | - | 以表格形式显示 CSV。如果文件以 `.csv` 或 `.tsv` 结尾会自动检测 |
-| `--head` `LINES` | `-h` | 只显示前 LINES 行（需要 `--syntax` 或 `--csv`） |
-| `--tail` `LINES` | `-t` | 只显示后 LINES 行（需要 `--syntax` 或 `--csv`） |
-
-### 导出
-
-导出输出内容到文件。
-
-| 选项 | 短选项 | 说明 |
-|------|--------|------|
-| `--export-html` `PATH` | `-o` | 将输出导出为 HTML 文件 |
-| `--export-svg` `PATH` | - | 将输出导出为 SVG 文件 |
-
-### Pager
-
-分页显示相关选项。
-
-| 选项 | 短选项 | 说明 |
-|------|--------|------|
-| `--pager` | - | 在交互式分页器中显示内容。支持光标键、PageUp/PageDown、Home/End 以及 vi 风格的 j/k/ctrl-d/ctrl-u 导航 |
-
-### 其他
-
-其他杂项选项。
-
-| 选项 | 短选项 | 说明 |
-|------|--------|------|
-| `--version` | `-v` | 显示版本信息并退出 |
-
-
-<!-- END OPTIONS -->
-
-## 通用选项使用示例
-
-以下是一些常用选项的使用示例：
+There are a number of additional switches you may add to modify the content rendered to the terminal. These options are universal and apply to all of the above features.
 
 ### Style
 
@@ -375,3 +267,73 @@ rich "Hello, [b]World[/b]!" -p -a heavy
 ```
 
 ![panel1](https://raw.githubusercontent.com/Textualize/rich-cli/main/imgs/panel1.png)
+
+## 本地开发
+
+本项目提供了 Makefile 来统一管理日常开发任务。
+
+### 前置要求
+
+- Python 3.9+
+- [Poetry](https://python-poetry.org/)
+
+### 安装开发依赖
+
+```bash
+poetry install
+```
+
+### 日常开发命令
+
+#### 主要入口
+
+| 命令 | 说明 | 场景 |
+|------|------|------|
+| `make check` | 日常检查（格式检查 + 构建 + 冒烟），**不污染仓库** | 日常开发快速验证，稳定通过，运行后无残留产物 |
+| `make verify` | 完整验证（格式检查 + 类型检查 + 构建 + 冒烟），不污染仓库 | 提交前/合并前完整检查，**会暴露项目遗留的类型问题** |
+| `make fix` | 自动修复（格式化代码），会修改文件 | 格式检查失败时自动修复 |
+
+#### 细分命令
+
+| 命令 | 说明 |
+|------|------|
+| `make help` | 显示所有可用命令 |
+| `make format-check` | 格式检查 (black --check)，不改文件 |
+| `make format` | 格式化代码 (black)，会修改文件 |
+| `make typecheck` | 类型检查 (mypy) |
+| `make typecheck-strict` | 严格类型检查（同 typecheck，预留扩展） |
+| `make build` | 打包构建 |
+| `make smoke` | 冒烟测试（运行多个示例命令） |
+| `make clean` | 清理临时产物（dist、pycache 等） |
+
+### 开发工作流
+
+日常开发中，运行快速检查：
+
+```bash
+make check
+```
+
+如果格式检查失败，先运行自动修复：
+
+```bash
+make fix
+```
+
+提交代码前，运行完整验证：
+
+```bash
+make verify
+```
+
+### 类型检查说明
+
+当前项目存在遗留的类型问题，`make typecheck` 会暴露这些问题。日常开发使用 `make check` 避免入口长期红灯；提交前建议运行 `make verify` 进行完整检查。
+
+如果某一步失败，脚本会清楚地标明失败发生在哪个阶段，例如：
+
+```
+========== 类型检查 ==========
+...
+✗ 错误发生在: 类型检查
+```
