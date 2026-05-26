@@ -167,13 +167,18 @@ rich https://raw.githubusercontent.com/Textualize/rich-cli/main/README.md --mark
 
 ## Exporting
 
-In addition to rendering to the console, `rich` can write an HTML file. This works with any command. Add `--export-html` or `-o` followed by the output path.
+In addition to rendering to the console, `rich` can write an HTML or SVG file. This works with any command. Add `--export-html` or `-o` followed by the output path, or `--export-svg` for SVG output.
 
 ```
 rich README.md -o readme.html
+rich README.md --export-svg readme.svg
 ```
 
-After running this command you should find a "readme.html" in your current working directory.
+> **Tip for developers:** Exported files are runtime artifacts. To avoid polluting the repository root, prefer exporting into the `.artifacts/` directory:
+> ```
+> rich README.md -o .artifacts/readme.html
+> ```
+> The `.artifacts/` directory is listed in `.gitignore` and is cleaned by `make clean`.
 
 ## Rich Printing
 
@@ -304,7 +309,15 @@ poetry install
 | `make typecheck-strict` | 严格类型检查（同 typecheck，预留扩展） |
 | `make build` | 打包构建 |
 | `make smoke` | 冒烟测试（运行多个示例命令） |
-| `make clean` | 清理临时产物（dist、pycache 等） |
+| `make clean` | 清理临时产物（dist、pycache、.artifacts/、profile 调试文件等） |
+
+### 产物与清理
+
+为避免运行产物污染仓库根目录，所有导出和临时文件遵循以下约定：
+
+- **推荐导出路径：** 使用 `.artifacts/` 目录存放导出文件，例如 `rich README.md -o .artifacts/readme.html`
+- **明确清理范围：** `make clean` 仅删除 `.artifacts/` 目录、`*.prof`/`*.pstats`/`.profile` 等 profile 调试文件，以及构建产物；**不会**删除根目录下的 `*.html`/`*.svg`，避免误删合法资源
+- **统一导出约定：** 示例导出和 smoke 测试均写入 `.artifacts/`，所有运行产物集中管理，一键清理
 
 ### 开发工作流
 

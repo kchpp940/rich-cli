@@ -5,7 +5,7 @@ GREEN = \033[0;32m
 YELLOW = \033[1;33m
 NC = \033[0m
 
-TMPDIR = $(shell mktemp -d)
+ARTIFACTS_DIR = .artifacts
 
 help:
 	@echo "Rich-CLI 开发入口脚本"
@@ -60,13 +60,14 @@ smoke:
 	@poetry run rich "Hello [b]World[/b]!" --print > /dev/null || (printf "$(RED)✗ 错误发生在: 冒烟测试 - 文本渲染$(NC)\n" && exit 1)
 	@echo "测试 5: 语法高亮 (带行号)"
 	@poetry run rich src/rich_cli/__main__.py -n > /dev/null || (printf "$(RED)✗ 错误发生在: 冒烟测试 - 语法高亮$(NC)\n" && exit 1)
-	@echo "测试 6: 导出 HTML 到临时目录"
-	@poetry run rich README.md --export-html $(TMPDIR)/test_export.html > /dev/null || (printf "$(RED)✗ 错误发生在: 冒烟测试 - 导出 HTML$(NC)\n" && rm -rf $(TMPDIR) && exit 1)
-	@rm -rf $(TMPDIR)
-	@printf "$(GREEN)✓ 冒烟测试 完成$(NC)\n"
+	@echo "测试 6: 导出 HTML 到 .artifacts/ 目录"
+	@mkdir -p $(ARTIFACTS_DIR)
+	@poetry run rich README.md --export-html $(ARTIFACTS_DIR)/test_export.html > /dev/null || (printf "$(RED)✗ 错误发生在: 冒烟测试 - 导出 HTML$(NC)\n" && exit 1)
+	@printf "$(GREEN)✓ 冒烟测试 完成（导出文件位于 .artifacts/，可通过 make clean 清理）$(NC)\n"
 
 clean:
 	@printf "\n$(YELLOW)========== 清理临时产物 ==========$(NC)\n"
+	@rm -rf $(ARTIFACTS_DIR)/
 	@rm -rf dist/
 	@rm -rf build/
 	@rm -rf *.egg-info
@@ -75,7 +76,8 @@ clean:
 	@find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	@rm -rf .mypy_cache/
-	@printf "$(GREEN)✓ 清理临时产物 完成$(NC)\n"
+	@rm -f *.prof *.pstats .profile
+	@printf "$(GREEN)✓ 清理临时产物 完成 (仅 .artifacts/、profile 调试文件、构建产物)$(NC)\n"
 
 fix: format
 	@echo ""
@@ -84,14 +86,14 @@ fix: format
 	@echo "$(GREEN)========================================$(NC)"
 
 check: format-check build smoke
-	@rm -rf dist/ build/ *.egg-info src/*.egg-info
+	@rm -rf $(ARTIFACTS_DIR)/ dist/ build/ *.egg-info src/*.egg-info
 	@echo ""
 	@echo "$(GREEN)========================================$(NC)"
 	@echo "$(GREEN)✓ 所有日常检查通过！$(NC)"
 	@echo "$(GREEN)========================================$(NC)"
 
 verify: format-check typecheck build smoke
-	@rm -rf dist/ build/ *.egg-info src/*.egg-info
+	@rm -rf $(ARTIFACTS_DIR)/ dist/ build/ *.egg-info src/*.egg-info
 	@echo ""
 	@echo "$(GREEN)========================================$(NC)"
 	@echo "$(GREEN)✓ 所有验证通过！$(NC)"
