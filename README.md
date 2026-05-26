@@ -40,6 +40,30 @@ Or using `conda` or `mamba`:
 mamba install -c conda-forge rich-cli
 ```
 
+### Core Features (included by default)
+
+- **Syntax highlighting**: Powered by [Pygments](https://pygments.org/), supporting hundreds of programming languages and file formats.
+- **Rich rendering**: Markdown, JSON, CSV, and more built in.
+
+### Optional Dependencies
+
+Rich-CLI has optional dependencies for additional features. Install them with:
+
+| Feature | Installation Command |
+|---------|---------------------|
+| URL support (http/https) | `pip install rich-cli[http]` |
+| Interactive pager (--pager) | `pip install rich-cli[pager]` |
+| RST rendering (--rst) | `pip install rich-cli[rst]` |
+| All optional features | `pip install rich-cli[full]` |
+
+For pipx users, use the `--pip-args` flag:
+
+```
+pipx install rich-cli --pip-args "rich-cli[full]"
+```
+
+When a feature requiring an optional dependency is used without it being installed, Rich-CLI will provide a clear error message with the installation command.
+
 ## Rich command
 
 Once installed you should have the `rich` command in your path. Run the following to see usage / help:
@@ -167,18 +191,13 @@ rich https://raw.githubusercontent.com/Textualize/rich-cli/main/README.md --mark
 
 ## Exporting
 
-In addition to rendering to the console, `rich` can write an HTML or SVG file. This works with any command. Add `--export-html` or `-o` followed by the output path, or `--export-svg` for SVG output.
+In addition to rendering to the console, `rich` can write an HTML file. This works with any command. Add `--export-html` or `-o` followed by the output path.
 
 ```
 rich README.md -o readme.html
-rich README.md --export-svg readme.svg
 ```
 
-> **Tip for developers:** Exported files are runtime artifacts. To avoid polluting the repository root, prefer exporting into the `.artifacts/` directory:
-> ```
-> rich README.md -o .artifacts/readme.html
-> ```
-> The `.artifacts/` directory is listed in `.gitignore` and is cleaned by `make clean`.
+After running this command you should find a "readme.html" in your current working directory.
 
 ## Rich Printing
 
@@ -309,15 +328,7 @@ poetry install
 | `make typecheck-strict` | 严格类型检查（同 typecheck，预留扩展） |
 | `make build` | 打包构建 |
 | `make smoke` | 冒烟测试（运行多个示例命令） |
-| `make clean` | 清理临时产物（dist、pycache、.artifacts/、profile 调试文件等） |
-
-### 产物与清理
-
-为避免运行产物污染仓库根目录，所有导出和临时文件遵循以下约定：
-
-- **推荐导出路径：** 使用 `.artifacts/` 目录存放导出文件，例如 `rich README.md -o .artifacts/readme.html`
-- **明确清理范围：** `make clean` 仅删除 `.artifacts/` 目录、`*.prof`/`*.pstats`/`.profile` 等 profile 调试文件，以及构建产物；**不会**删除根目录下的 `*.html`/`*.svg`，避免误删合法资源
-- **统一导出约定：** 示例导出和 smoke 测试均写入 `.artifacts/`，所有运行产物集中管理，一键清理
+| `make clean` | 清理临时产物（dist、pycache 等） |
 
 ### 开发工作流
 
